@@ -48,7 +48,7 @@ export function RulesSidebar() {
 
   const save = async (parsed: ParsedRule, source: string) => {
     const filter = { ...ruleFilter({ ...parsed, id: "", source, builtin: false }), active_only: true };
-    const v = await api.saveView(parsed.name, { filter, sort: "time_desc", columns: [], rule_source: source });
+    const v = await api.saveView(parsed.name, { filter, sort: "time_asc", columns: [], rule_source: source });
     // 이름을 바꿔 저장했으면 옛 항목은 지운다(저장은 이름 기준 upsert).
     if (editor?.mode === "edit" && editor.rule.viewId !== undefined && editor.rule.viewId !== v.view_id) {
       await api.deleteView(editor.rule.viewId);

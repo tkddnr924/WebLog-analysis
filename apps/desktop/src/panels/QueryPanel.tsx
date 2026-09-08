@@ -48,7 +48,7 @@ export function composeFilter(base: LogFilter, f: Form): LogFilter | string {
 export function QueryPanel() {
   const { project, setNotice, ruleRequest, setCurrentFilter } = useAppState();
   const [form, setForm] = useState<Form>(emptyForm);
-  const [sort, setSort] = useState<SortOrder>("time_desc");
+  const [sort, setSort] = useState<SortOrder>("time_asc");
   const [applied, setApplied] = useState<{ filter: LogFilter; sort: SortOrder } | null>(null);
   const [cache, setCache] = useState<PageCache>(emptyCache(0));
   const [loading, setLoading] = useState(false);
@@ -168,8 +168,8 @@ export function QueryPanel() {
         <label className="f f-sort">
           <span>정렬</span>
           <select value={sort} onChange={(e) => setSort(e.target.value as SortOrder)}>
-            <option value="time_desc">최신순</option>
             <option value="time_asc">오래된순</option>
+            <option value="time_desc">최신순</option>
           </select>
         </label>
         <button type="submit" className="primary f-submit" disabled={loading}>
