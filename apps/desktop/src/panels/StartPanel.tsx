@@ -203,9 +203,15 @@ export function StartPanel() {
       ? null
       : { kind: "preset", name: selection.profileName };
 
-  // 판별 대상 파일: 선택한 프로필로 판별된 첫 파일, 없으면 첫 선택 파일.
-  const target = selection.files.find((f) => f.best_profile === selection.profileName) ?? selection.files[0] ?? null;
-  const targetPath = target?.path ?? null;
+  // 판별 후보: 내용이 있는 파일을 (판별된 프로필 일치 → 크기 큰 순)으로 늘어놓고, 첫 줄이 나오는 파일을 쓴다.
+  // 빈 파일이나 빈 gzip은 건너뛴다.
+  const candidates = useMemo(() => {
+    const files = selection.files.filter((f) => f.file_size > 0 && !f.detect_error);
+    const score = (f: ScannedFile) => (f.best_profile === selection.profileName ? 1 : 0);
+    return [...files].sort((a, b) => score(b) - score(a) || b.file_size - a.file_size).map((f) => f.path);
+  }, [selection.files, selection.profileName]);
+  const target = candidates.length > 0 ? (selection.files.find((f) => f.path === (sample?.path ?? candidates[0])) ?? null) : null;
+  const candidateKey = candidates.join("\u0000");
   // 탐색을 다시 하면 같은 파일이라도 샘플을 다시 읽는다(서버 종류 변경 등).
   const scanId = selection.scan;
   // 정의 내용이 바뀔 때마다 다시 판별해야 하므로 내용 자체를 키로 쓴다(정의는 작다).
@@ -213,22 +219,36 @@ export function StartPanel() {
 
   // 대상 파일이나 프로필이 바뀌면 첫 줄을 다시 읽어 판별한다. 늦게 온 응답은 버린다.
   useEffect(() => {
-    if (!targetPath) {
+    if (candidates.length === 0) {
       setSample(null);
       return;
     }
     const id = ++sampleReq.current;
-    // 다른 파일(다른 탭 포함)로 바뀌면 이전 줄로 라벨을 추정하지 않도록 먼저 비운다.
-    setSample((prev) => (prev && prev.path !== targetPath ? null : prev));
+    // 다른 탭·다른 탐색으로 바뀌면 이전 줄로 라벨을 추정하지 않도록 먼저 비운다.
+    setSample((prev) => (prev && !candidates.includes(prev.path) ? null : prev));
     setSampling(true);
-    Promise.all([api.sampleLines(targetPath, SAMPLE_LINES), spec ? api.previewFormat(targetPath, spec, SAMPLE_LINES) : Promise.resolve(null)])
-      .then(([lines, preview]) => {
+    (async () => {
+      // 후보를 차례로 열어 실제 텍스트 줄이 있는 첫 파일을 쓴다(최대 8개).
+      let picked: { path: string; lines: Awaited<ReturnType<typeof api.sampleLines>> } | null = null;
+      for (const path of candidates.slice(0, 8)) {
+        const lines = await api.sampleLines(path, SAMPLE_LINES);
         if (id !== sampleReq.current) return;
-        const outcome = preview ? (preview.outcomes.find((o) => o.kind !== "skipped") ?? preview.outcomes[0] ?? null) : null;
-        const firstText = lines.lines.find((l) => l.text !== null && l.text.trim() !== "");
-        const raw = outcome ? (lines.lines.find((l) => l.line_number === outcome.line_number)?.text ?? null) : (firstText?.text ?? null);
-        setSample({ path: targetPath, raw, outcome, preview });
-      })
+        if (lines.lines.some((l) => l.text !== null && l.text.trim() !== "")) {
+          picked = { path, lines };
+          break;
+        }
+      }
+      if (!picked) {
+        setSample({ path: candidates[0], raw: null, outcome: null, preview: null });
+        return;
+      }
+      const preview = spec ? await api.previewFormat(picked.path, spec, SAMPLE_LINES) : null;
+      if (id !== sampleReq.current) return;
+      const outcome = preview ? (preview.outcomes.find((o) => o.kind !== "skipped") ?? preview.outcomes[0] ?? null) : null;
+      const firstText = picked.lines.lines.find((l) => l.text !== null && l.text.trim() !== "");
+      const raw = outcome ? (picked.lines.lines.find((l) => l.line_number === outcome.line_number)?.text ?? null) : (firstText?.text ?? null);
+      setSample({ path: picked.path, raw, outcome, preview });
+    })()
       .catch((e) => {
         if (id === sampleReq.current) setNotice(errorText(e));
       })
@@ -237,7 +257,7 @@ export function StartPanel() {
       });
     // spec 객체는 매 렌더 새로 만들어지므로 내용 키로 비교한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetPath, specKey, scanId, setNotice]);
+  }, [candidateKey, specKey, scanId, setNotice]);
 
   // ----- 퍼즐 매핑 -----
   const raw = sample?.raw ?? null;
@@ -452,7 +472,7 @@ export function StartPanel() {
           </div>
           {sample &&
             (sample.raw === null ? (
-              <p className="muted">이 줄은 UTF-8이 아니거나 너무 길어 표시할 수 없습니다.</p>
+              <p className="muted">{sample.outcome ? "이 줄은 UTF-8이 아니거나 너무 길어 표시할 수 없습니다." : "읽을 수 있는 줄이 없습니다. 파일이 비어 있거나 압축 안이 비어 있습니다."}</p>
             ) : isW3c ? (
               <>
                 <pre className="raw-line">{sample.raw}</pre>
