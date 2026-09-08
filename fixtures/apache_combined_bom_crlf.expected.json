@@ -1,0 +1,4 @@
+[
+  {"kind":"record","line_number":1,"timestamp_utc":971186136000000,"tz_offset_seconds":0,"client_ip":"10.0.0.1","method":"GET","request_target":"/bom","protocol":"HTTP/1.1","status":200,"bytes_sent":1,"referrer":null,"user_agent":null},
+  {"kind":"record","line_number":2,"timestamp_utc":971186137000000,"tz_offset_seconds":0,"client_ip":"10.0.0.2","method":"GET","request_target":"/crlf","protocol":"HTTP/1.1","status":200,"bytes_sent":2,"referrer":null,"user_agent":null}
+]

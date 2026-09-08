@@ -1,0 +1,5 @@
+[
+  {"kind":"error","line_number":1,"code":"header_missing"},
+  {"kind":"skipped","line_number":2,"reason":"directive"},
+  {"kind":"record","line_number":3,"timestamp_utc":1704164646000000,"tz_offset_seconds":0,"client_ip":"10.0.0.1","method":"GET","request_target":"/index.html","protocol":null,"status":200,"bytes_sent":null,"referrer":null,"user_agent":null}
+]

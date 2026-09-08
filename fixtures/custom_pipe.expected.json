@@ -1,0 +1,7 @@
+[
+  {"kind":"record","line_number":1,"timestamp_utc":1709251200000000,"tz_offset_seconds":32400,"client_ip":"10.1.2.3","method":"GET","request_target":"/a?b=1","protocol":null,"status":200,"bytes_sent":1234,"referrer":null,"user_agent":"Mozilla/5.0","extra":{"response_time_ms":"12"}},
+  {"kind":"record","line_number":2,"timestamp_utc":1709283601000000,"tz_offset_seconds":0,"client_ip":"10.1.2.4","method":"POST","request_target":"/b","protocol":null,"status":500,"bytes_sent":null,"referrer":null,"user_agent":null},
+  {"kind":"record","line_number":3,"timestamp_utc":1709251202000000,"tz_offset_seconds":32400,"client_ip":null,"method":"GET","request_target":"/c","protocol":null,"status":404,"bytes_sent":0,"referrer":null,"user_agent":"ua"},
+  {"kind":"error","line_number":4,"code":"no_match"},
+  {"kind":"error","line_number":5,"code":"no_match"}
+]

@@ -1,0 +1,12 @@
+[
+  {"kind":"record","line_number":1,"timestamp_utc":971211336000000,"tz_offset_seconds":-25200,"client_ip":"127.0.0.1","method":"GET","request_target":"/apache_pb.gif?x=1&y=%20","protocol":"HTTP/1.0","status":200,"bytes_sent":2326,"referrer":"http://www.example.com/start.html","user_agent":"Mozilla/4.08 [en] (Win98; I ;Nav)","extra":{"remote_user":"frank"}},
+  {"kind":"record","line_number":2,"timestamp_utc":971153737000000,"tz_offset_seconds":32400,"client_ip":"2001:db8::ff00:42:8329","method":"POST","request_target":"/api/items","protocol":"HTTP/1.1","status":201,"bytes_sent":null,"referrer":null,"user_agent":"curl/8.0 \\\"quoted\\\""},
+  {"kind":"error","line_number":3,"code":"no_match"},
+  {"kind":"record","line_number":4,"timestamp_utc":971186138000000,"tz_offset_seconds":0,"client_ip":"10.0.0.1","method":null,"request_target":"\\x16\\x03\\x01 garbage request","protocol":null,"status":400,"bytes_sent":0,"referrer":null,"user_agent":null},
+  {"kind":"skipped","line_number":5,"reason":"blank"},
+  {"kind":"error","line_number":6,"code":"invalid_ip","field":"client_ip"},
+  {"kind":"error","line_number":7,"code":"invalid_status","field":"status"},
+  {"kind":"error","line_number":8,"code":"invalid_timestamp","field":"timestamp"},
+  {"kind":"record","line_number":9,"timestamp_utc":971186141000000,"tz_offset_seconds":0,"client_ip":"10.0.0.4","method":"GET","request_target":"/dup","protocol":"HTTP/1.1","status":200,"bytes_sent":5,"referrer":null,"user_agent":"ua"},
+  {"kind":"record","line_number":10,"timestamp_utc":971186141000000,"tz_offset_seconds":0,"client_ip":"10.0.0.4","method":"GET","request_target":"/dup","protocol":"HTTP/1.1","status":200,"bytes_sent":5,"referrer":null,"user_agent":"ua"}
+]

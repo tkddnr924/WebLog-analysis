@@ -1,0 +1,25 @@
+[package]
+name = "weblog-engine"
+version = "0.1.0"
+description = "GUI 독립 웹 로그 파서·저장·조회 엔진"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+duckdb.workspace = true
+flate2.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+serde_norway.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

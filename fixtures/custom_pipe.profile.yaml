@@ -1,0 +1,56 @@
+# custom_pipe.profile.json과 의미가 같은 YAML 정의. 주석은 보존되지 않는다.
+schema_version: 1
+name: custom_pipe
+version: 1
+server_hint: unknown
+timezone:
+  kind: fixed
+  offset_seconds: 32400
+strategy:
+  kind: blocks
+  blocks:
+    - block: field
+      name: timestamp
+      kind: { kind: timestamp, format: { kind: iso8601 } }
+      capture: { kind: pattern, pattern: "[^|]+" }
+      missing: []
+    - { block: literal, text: "|" }
+    - block: field
+      name: client_ip
+      kind: { kind: client_ip }
+      capture: { kind: pattern, pattern: "[^|]+" }
+      missing: ["-"]
+    - { block: literal, text: "|" }
+    - block: field
+      name: method
+      kind: { kind: method }
+      capture: { kind: pattern, pattern: "[^|]+" }
+      missing: ["-"]
+    - { block: literal, text: "|" }
+    - block: field
+      name: request_target
+      kind: { kind: request_target }
+      capture: { kind: pattern, pattern: "[^|]+" }
+      missing: ["-"]
+    - { block: literal, text: "|" }
+    - block: field
+      name: status
+      kind: { kind: status }
+      capture: { kind: pattern, pattern: "[^|]+" }
+      missing: ["-"]
+    - { block: literal, text: "|" }
+    - block: field
+      name: bytes_sent
+      kind: { kind: bytes_sent }
+      capture: { kind: pattern, pattern: "[^|]*" }
+      missing: ["-", ""]
+    - { block: literal, text: "|" }
+    - block: field
+      name: user_agent
+      kind: { kind: user_agent }
+      capture: { kind: pattern, pattern: "[^|]*" }
+      missing: ["-", ""]
+    - block: optional_group
+      blocks:
+        - { block: literal, text: "|" }
+        - { block: regex, pattern: "rt=(?P<response_time_ms>[0-9]+)" }

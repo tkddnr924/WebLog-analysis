@@ -1,0 +1,12 @@
+[
+  {"kind":"skipped","line_number":1,"reason":"directive"},
+  {"kind":"skipped","line_number":2,"reason":"directive"},
+  {"kind":"skipped","line_number":3,"reason":"directive"},
+  {"kind":"skipped","line_number":4,"reason":"directive"},
+  {"kind":"record","line_number":5,"timestamp_utc":1704164645000000,"tz_offset_seconds":0,"client_ip":"192.168.1.5","method":"GET","request_target":"/index.html?a=1&b=2","protocol":null,"status":200,"bytes_sent":null,"referrer":"http://ref.example/","user_agent":"Mozilla/5.0+(Windows)","extra":{"s-ip":"10.0.0.1","s-port":"80","sc-substatus":"0","sc-win32-status":"0","time-taken":"15"}},
+  {"kind":"record","line_number":6,"timestamp_utc":1704164646000000,"tz_offset_seconds":0,"client_ip":"192.168.1.6","method":"POST","request_target":"/api/login","protocol":null,"status":302,"bytes_sent":null,"referrer":null,"user_agent":null,"extra":{"s-ip":"10.0.0.1","s-port":"443","cs-username":"alice","sc-substatus":"0","sc-win32-status":"0","time-taken":"7"}},
+  {"kind":"error","line_number":7,"code":"field_count_mismatch"},
+  {"kind":"skipped","line_number":8,"reason":"directive"},
+  {"kind":"record","line_number":9,"timestamp_utc":1704164700000000,"tz_offset_seconds":0,"client_ip":"2001:db8::1","method":"GET","request_target":"/after-header-change","protocol":null,"status":404,"bytes_sent":512,"referrer":null,"user_agent":null},
+  {"kind":"record","line_number":10,"timestamp_utc":1704164701000000,"tz_offset_seconds":0,"client_ip":"192.168.1.7","method":"GET","request_target":"/ok","protocol":null,"status":200,"bytes_sent":null,"referrer":null,"user_agent":null}
+]

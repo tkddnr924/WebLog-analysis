@@ -1,0 +1,68 @@
+# 태그(v*)를 푸시하면 Windows x64 빌드를 만들어 GitHub Release에 올린다.
+# 산출물: Weblog-analysis.exe(단일 실행 파일, WebView2 런타임 필요) + Weblog-analysis-setup.exe(NSIS 설치 파일).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # DuckDB(bundled)는 C++ 컴파일이 오래 걸리므로 cargo 캐시를 쓴다.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks
+        working-directory: apps/desktop
+        run: pnpm typecheck && pnpm test
+
+      - name: Build (Tauri, NSIS)
+        working-directory: apps/desktop
+        run: pnpm tauri build --bundles nsis
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p out
+          cp target/release/weblog-desktop.exe out/Weblog-analysis.exe
+          cp target/release/bundle/nsis/*-setup.exe out/Weblog-analysis-setup.exe
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Weblog-analysis-windows-x64
+          path: out/*
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

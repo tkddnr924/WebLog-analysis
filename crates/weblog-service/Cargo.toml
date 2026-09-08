@@ -1,0 +1,22 @@
+[package]
+name = "weblog-service"
+version = "0.1.0"
+description = "애플리케이션 서비스 계층: 프로젝트 열기, 백그라운드 가져오기, 제한된 조회. Tauri에 의존하지 않는다"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# 케이스 DB 파일 이름에 붙일 로컬 시각.
+chrono.workspace = true
+weblog-engine = { path = "../weblog-engine" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

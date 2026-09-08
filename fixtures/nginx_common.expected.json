@@ -1,0 +1,6 @@
+[
+  {"kind":"record","line_number":1,"timestamp_utc":1704067200000000,"tz_offset_seconds":0,"client_ip":"192.168.0.10","method":"GET","request_target":"/index.html","protocol":"HTTP/1.1","status":200,"bytes_sent":612,"referrer":null,"user_agent":null},
+  {"kind":"record","line_number":2,"timestamp_utc":1704067201000000,"tz_offset_seconds":0,"client_ip":"192.168.0.11","method":"HEAD","request_target":"/health","protocol":"HTTP/2.0","status":204,"bytes_sent":0,"referrer":null,"user_agent":null,"extra":{"remote_user":"admin"}},
+  {"kind":"record","line_number":3,"timestamp_utc":1704067202000000,"tz_offset_seconds":0,"client_ip":"192.168.0.12","method":"GET","request_target":"/missing","protocol":"HTTP/1.1","status":404,"bytes_sent":153,"referrer":null,"user_agent":null},
+  {"kind":"error","line_number":4,"code":"no_match"}
+]

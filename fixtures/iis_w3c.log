@@ -1,0 +1,10 @@
+#Software: Microsoft Internet Information Services 10.0
+#Version: 1.0
+#Date: 2024-01-02 03:04:05
+#Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) cs(Referer) sc-status sc-substatus sc-win32-status time-taken
+2024-01-02 03:04:05 10.0.0.1 GET /index.html a=1&b=2 80 - 192.168.1.5 Mozilla/5.0+(Windows) http://ref.example/ 200 0 0 15
+2024-01-02 03:04:06 10.0.0.1 POST /api/login - 443 alice 192.168.1.6 - - 302 0 0 7
+2024-01-02 03:04:07 10.0.0.1 GET /short - 80
+#Fields: date time c-ip cs-method cs-uri-stem sc-status sc-bytes
+2024-01-02 03:05:00 2001:db8::1 GET /after-header-change 404 512
+2024-01-02 03:05:01 192.168.1.7 GET /ok 200 -
