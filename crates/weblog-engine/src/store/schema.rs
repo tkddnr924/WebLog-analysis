@@ -5,7 +5,7 @@ use duckdb::{params, Connection, OptionalExt};
 use crate::error::{EngineError, EngineResult};
 
 /// 현재 스키마 버전.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 const V1: &str = r#"
 CREATE TABLE IF NOT EXISTS sources (
@@ -95,6 +95,12 @@ CREATE TABLE IF NOT EXISTS saved_views (
     name            VARCHAR NOT NULL,
     definition_json VARCHAR NOT NULL
 );
+CREATE TABLE IF NOT EXISTS bookmarks (
+    source_id   BIGINT NOT NULL,
+    line_number BIGINT NOT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (source_id, line_number)
+);
 "#;
 
 /// v2: 결과 버전 전환(active, replaces_job_id)과 전체 파일 해시.
@@ -107,8 +113,18 @@ ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS replaces_job_id BIGINT;
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS full_hash VARCHAR;
 "#;
 
+/// v3: 북마크(파일·줄 기준). 새 저장소는 v1 CREATE에 이미 있어 no-op이다.
+const V3: &str = r#"
+CREATE TABLE IF NOT EXISTS bookmarks (
+    source_id   BIGINT NOT NULL,
+    line_number BIGINT NOT NULL,
+    created_at  TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (source_id, line_number)
+);
+"#;
+
 /// 마이그레이션 목록. 인덱스 0이 버전 1이다.
-const MIGRATIONS: &[&str] = &[V1, V2];
+const MIGRATIONS: &[&str] = &[V1, V2, V3];
 
 /// 스키마를 최신 버전으로 올린다. 저장소가 엔진보다 새 버전이면 오류.
 pub fn migrate(conn: &Connection) -> EngineResult<()> {
@@ -198,7 +214,7 @@ mod tests {
         )
         .unwrap();
         migrate(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 2);
+        assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
         let active: bool = conn
             .query_row("SELECT active FROM import_jobs WHERE job_id = 1", [], |r| {
                 r.get(0)

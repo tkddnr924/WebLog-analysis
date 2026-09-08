@@ -67,6 +67,7 @@ pub fn run() {
             commands::list_views,
             commands::save_view,
             commands::delete_view,
+            commands::toggle_bookmark,
             commands::start_export,
             commands::cancel_export,
             commands::export_status,

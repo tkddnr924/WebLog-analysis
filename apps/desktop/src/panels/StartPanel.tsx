@@ -514,6 +514,7 @@ function fileSummary(files: ScannedFile[], majority: string): ReactNode {
 function FileRow({ f, root, majority, checked, onToggle }: { f: ScannedFile; root: string; majority: string | null; checked: boolean; onToggle: () => void }) {
   let flag: { cls: string; text: string; title: string } | null = null;
   if (f.detect_error) flag = { cls: "bad", text: "읽기 실패", title: f.detect_error };
+  else if (f.file_size === 0) flag = { cls: "empty", text: "데이터 없음", title: "빈 파일입니다" };
   else if (majority === null) flag = null;
   else if (!f.best_profile) flag = { cls: "warn", text: "판별 안 됨", title: "선두 줄이 어떤 포맷과도 맞지 않습니다" };
   else if (f.best_profile !== majority) flag = { cls: "warn", text: "다른 포맷", title: "다른 파일들과 포맷이 다릅니다. 포맷이 같은 파일끼리 나눠서 가져오세요." };

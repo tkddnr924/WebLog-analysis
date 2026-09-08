@@ -271,6 +271,17 @@ pub async fn save_view(
     blocking(move || s.save_view(&name, &definition)).await
 }
 
+/// 북마크 토글(파일·줄 기준). 켜지면 true.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn toggle_bookmark(
+    state: ServiceState<'_>,
+    source_id: i64,
+    line_number: i64,
+) -> ServiceResult<bool> {
+    let s = owned(&state);
+    blocking(move || s.toggle_bookmark(source_id, line_number)).await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn delete_view(state: ServiceState<'_>, view_id: i64) -> ServiceResult<bool> {
     let s = owned(&state);

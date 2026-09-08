@@ -70,6 +70,7 @@ export const api = {
   listViews: () => invoke<SavedView[]>("list_views"),
   saveView: (name: string, definition: ViewDefinition) => invoke<SavedView>("save_view", { name, definition }),
   deleteView: (view_id: number) => invoke<boolean>("delete_view", { view_id }),
+  toggleBookmark: (source_id: number, line_number: number) => invoke<boolean>("toggle_bookmark", { source_id, line_number }),
   startExport: (request: ExportRequest) => invoke<void>("start_export", { request }),
   cancelExport: () => invoke<void>("cancel_export"),
   exportStatus: () => invoke<ExportStatusView | null>("export_status"),

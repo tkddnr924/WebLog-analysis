@@ -10,15 +10,7 @@ import { decodeHexEscapes, describeBinary, hasHexEscapes } from "../lib/escapes"
 import type { DetailView, LogRow } from "../types";
 
 /** 오른쪽에서 나오는 드로어. 바깥을 누르거나 Esc로 닫는다. */
-export function DetailPanel({
-  row,
-  jobId,
-  onClose,
-}: {
-  row: LogRow;
-  jobId: number | null;
-  onClose: () => void;
-}) {
+export function DetailPanel({ row, jobId, onClose, onToggleBookmark }: { row: LogRow; jobId: number | null; onClose: () => void; onToggleBookmark: () => void }) {
   const [view, setView] = useState<DetailView | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 경로는 퍼센트 인코딩을 풀어 보여준다. 원문이 필요하면 토글로 되돌린다.
@@ -81,6 +73,9 @@ export function DetailPanel({
               · {row.line_number.toLocaleString("ko-KR")}번째 줄
             </span>
           </div>
+          <button type="button" className={`star big ${row.bookmarked ? "on" : ""}`} onClick={onToggleBookmark} aria-pressed={row.bookmarked} title={row.bookmarked ? "북마크 해제" : "북마크"}>
+            {row.bookmarked ? "★" : "☆"}
+          </button>
           <button className="linklike" onClick={onClose}>
             닫기
           </button>

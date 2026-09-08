@@ -38,6 +38,7 @@ const row = (line: number): LogRow => ({
   request_target: "/x",
   status: 200,
   bytes_sent: 1,
+  bookmarked: false,
 });
 
 const page = (from: number, n: number, more: boolean): LogPage => ({

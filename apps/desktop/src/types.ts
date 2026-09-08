@@ -249,6 +249,8 @@ export interface LogFilter {
   target_regex: string | null;
   /** 룰 조건식. 위 단순 조건과 AND로 결합한다. */
   expr: FilterExpr | null;
+  /** 북마크한 행만. */
+  bookmarked_only: boolean;
   active_only: boolean;
 }
 
@@ -290,6 +292,7 @@ export interface LogRow {
   request_target: string | null;
   status: number | null;
   bytes_sent: number | null;
+  bookmarked: boolean;
 }
 
 export interface LogPage {
@@ -348,6 +351,7 @@ export const emptyFilter = (): LogFilter => ({
   target_contains: null,
   target_regex: null,
   expr: null,
+  bookmarked_only: false,
   active_only: false,
 });
 

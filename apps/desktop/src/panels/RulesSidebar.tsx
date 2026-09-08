@@ -12,7 +12,7 @@ type EditorState = { mode: "add" } | { mode: "edit"; rule: Rule } | null;
 export function RulesSidebar() {
   const { project, applyRule, ruleRequest, setNotice } = useAppState();
   const [views, setViews] = useState<SavedView[]>([]);
-  const [selected, setSelected] = useState<string>(BUILTIN_RULES[0].id);
+  const [selected, setSelected] = useState<string>(BUILTIN_RULES[1].id);
   const [busy, setBusy] = useState(false);
   const [editor, setEditor] = useState<EditorState>(null);
 
@@ -31,7 +31,7 @@ export function RulesSidebar() {
 
   const custom = views.map(ruleFromView);
   const rules: Rule[] = [...BUILTIN_RULES, ...custom];
-  const rule = rules.find((r) => r.id === selected) ?? BUILTIN_RULES[0];
+  const rule = rules.find((r) => r.id === selected) ?? BUILTIN_RULES[1];
 
   const run = (r: Rule) => applyRule(r.name, ruleFilter(r, { active_only: true }));
 
@@ -42,7 +42,7 @@ export function RulesSidebar() {
 
   // 첫 진입: 기본 룰을 한 번 적용해 결과 화면이 비어 있지 않게 한다.
   useEffect(() => {
-    if (project && ruleRequest === null) run(BUILTIN_RULES[0]);
+    if (project && ruleRequest === null) run(BUILTIN_RULES[1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
 
@@ -66,9 +66,9 @@ export function RulesSidebar() {
     setBusy(true);
     try {
       await api.deleteView(rule.viewId);
-      setSelected(BUILTIN_RULES[0].id);
+      setSelected(BUILTIN_RULES[1].id);
       await loadViews();
-      run(BUILTIN_RULES[0]);
+      run(BUILTIN_RULES[1]);
     } catch (e) {
       setNotice(`룰 삭제 실패: ${errorText(e)}`);
     } finally {
@@ -90,7 +90,7 @@ export function RulesSidebar() {
       </div>
       <div className="rules-list" role="listbox" aria-label="룰 목록">
         {BUILTIN_RULES.map((r) => (
-          <RuleItem key={r.id} r={r} on={r.id === selected} onPick={() => pick(r)} onOpen={() => setEditor({ mode: "edit", rule: r })} />
+          <RuleItem key={r.id} r={r} on={r.id === selected} onPick={() => pick(r)} onOpen={r.source ? () => setEditor({ mode: "edit", rule: r }) : undefined} />
         ))}
         {custom.length > 0 && <div className="rules-sep">내 룰</div>}
         {custom.map((r) => (
@@ -111,22 +111,25 @@ export function RulesSidebar() {
 }
 
 /** 클릭은 적용, 더블클릭(또는 ✎)은 편집기. 기본 룰도 열어 볼 수 있고 저장하면 사용자 룰 복사본이 된다. */
-function RuleItem({ r, on, onPick, onOpen }: { r: Rule; on: boolean; onPick: () => void; onOpen: () => void }) {
+function RuleItem({ r, on, onPick, onOpen }: { r: Rule; on: boolean; onPick: () => void; onOpen?: () => void }) {
+  const bookmark = r.id === "builtin:bookmarks";
   return (
-    <div className={`rule-item ${on ? "on" : ""} ${r.error ? "broken" : ""}`} role="option" aria-selected={on} title={r.description} onClick={onPick} onDoubleClick={onOpen}>
+    <div className={`rule-item ${on ? "on" : ""} ${r.error ? "broken" : ""} ${bookmark ? "bookmark" : ""}`} role="option" aria-selected={on} title={r.description} onClick={onPick} onDoubleClick={onOpen}>
       <span className="rule-name">{r.name}</span>
-      <button
-        type="button"
-        className="rule-edit"
-        aria-label={`${r.name} 열기`}
-        title="원문 보기·편집"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpen();
-        }}
-      >
-        ✎
-      </button>
+      {onOpen && (
+        <button
+          type="button"
+          className="rule-edit"
+          aria-label={`${r.name} 열기`}
+          title="원문 보기·편집"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+        >
+          ✎
+        </button>
+      )}
     </div>
   );
 }

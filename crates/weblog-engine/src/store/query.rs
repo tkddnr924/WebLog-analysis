@@ -46,6 +46,9 @@ pub struct LogFilter {
     /// 룰 조건식(and/or/not 조합). 위의 단순 조건과 AND로 결합한다.
     #[serde(default)]
     pub expr: Option<FilterExpr>,
+    /// 북마크한 행만.
+    #[serde(default)]
+    pub bookmarked_only: bool,
     /// 활성 결과 버전만 조회.
     #[serde(default)]
     pub active_only: bool,
@@ -337,6 +340,9 @@ pub struct LogRow {
     pub status: Option<i32>,
     /// 전송 바이트.
     pub bytes_sent: Option<i64>,
+    /// 북마크 여부.
+    #[serde(default)]
+    pub bookmarked: bool,
 }
 
 impl LogRow {
@@ -460,6 +466,9 @@ pub(crate) fn filter_sql(filter: &LogFilter) -> EngineResult<SqlParts> {
         where_sql.push_str(" AND regexp_matches(request_target, ?)");
         params.push(Value::Text(v.clone()));
     }
+    if filter.bookmarked_only {
+        where_sql.push_str(" AND EXISTS (SELECT 1 FROM bookmarks b WHERE b.source_id = logs.source_id AND b.line_number = logs.line_number)");
+    }
     if let Some(e) = &filter.expr {
         where_sql.push_str(" AND ");
         let mut nodes = 0;
@@ -473,8 +482,7 @@ fn filter_hash(filter: &LogFilter, sort: SortOrder) -> EngineResult<String> {
     Ok(crate::format::model::fnv1a_hex(&bytes))
 }
 
-const ROW_COLUMNS: &str =
-    "source_id, line_number, epoch_us(timestamp_utc), client_ip, method, request_target, status, bytes_sent";
+const ROW_COLUMNS: &str = "source_id, line_number, epoch_us(timestamp_utc), client_ip, method, request_target, status, bytes_sent, EXISTS (SELECT 1 FROM bookmarks b WHERE b.source_id = logs.source_id AND b.line_number = logs.line_number)";
 
 fn read_row(r: &duckdb::Row<'_>) -> duckdb::Result<LogRow> {
     Ok(LogRow {
@@ -486,6 +494,7 @@ fn read_row(r: &duckdb::Row<'_>) -> duckdb::Result<LogRow> {
         request_target: r.get(5)?,
         status: r.get(6)?,
         bytes_sent: r.get(7)?,
+        bookmarked: r.get(8)?,
     })
 }
 
@@ -1080,6 +1089,33 @@ mod tests {
             page_size,
             cursor: None,
         }
+    }
+
+    #[test]
+    fn bookmarks_toggle_show_on_rows_and_filter() {
+        let (mut store, job) = seeded_store();
+        assert!(store.toggle_bookmark(1, 3).unwrap(), "처음 누르면 북마크됨");
+        assert!(store.toggle_bookmark(1, 7).unwrap());
+        assert!(!store.toggle_bookmark(1, 7).unwrap(), "다시 누르면 해제");
+        let r = req(job, 100, SortOrder::TimeAsc);
+        let rows: Vec<LogRow> = all_pages(&store, r.clone()).into_iter().flatten().collect();
+        let marked: Vec<i64> = rows
+            .iter()
+            .filter(|x| x.bookmarked)
+            .map(|x| x.line_number)
+            .collect();
+        assert_eq!(marked, vec![3]);
+        let mut only = r.clone();
+        only.filter.bookmarked_only = true;
+        only.filter.status = Some(500);
+        assert_eq!(
+            store.count_matching(&only.filter).unwrap(),
+            0,
+            "다른 조건과 AND"
+        );
+        only.filter.status = None;
+        assert_eq!(store.count_matching(&only.filter).unwrap(), 1);
+        let _ = &mut store;
     }
 
     #[test]

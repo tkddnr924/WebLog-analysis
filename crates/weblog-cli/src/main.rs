@@ -476,6 +476,7 @@ fn main() -> Result<()> {
                 target_contains,
                 target_regex,
                 expr: None,
+                bookmarked_only: false,
                 active_only: false,
             };
             let mut req = PageRequest {

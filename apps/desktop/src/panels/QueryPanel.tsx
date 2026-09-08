@@ -119,6 +119,20 @@ export function QueryPanel() {
   }, [ruleRequest?.nonce, project]);
 
   const rows = cache.rows;
+
+  /** 북마크 토글. 응답으로 캐시의 행을 제자리에서 갱신하고, 상세 창의 행도 맞춘다. */
+  const toggleBookmark = async (r: LogRow) => {
+    try {
+      const on = await api.toggleBookmark(r.source_id, r.line_number);
+      setCache((prev) => ({ ...prev, rows: prev.rows.map((x) => (x.source_id === r.source_id && x.line_number === r.line_number ? { ...x, bookmarked: on } : x)) }));
+      setSelected((sel) => (sel && sel.source_id === r.source_id && sel.line_number === r.line_number ? { ...sel, bookmarked: on } : sel));
+      // 북마크 뷰에서 해제하면 목록에서 바로 빠지도록 다시 조회한다.
+      if (!on && applied?.filter.bookmarked_only) void fetchPage(applied, true);
+    } catch (e) {
+      setNotice(errorText(e));
+    }
+  };
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -192,6 +206,7 @@ export function QueryPanel() {
       <div className="query-body">
         <div className="table-wrap virtual" ref={scrollRef}>
           <div className="vhead">
+            <span className="star-col" aria-label="북마크" />
             <span>시간(KST)</span>
             <span>IP</span>
             <span>메서드</span>
@@ -207,7 +222,7 @@ export function QueryPanel() {
               return (
                 <div
                   key={vi.key}
-                  className={`vrow ${isSel ? "sel" : ""}`}
+                  className={`vrow ${isSel ? "sel" : ""} ${r.bookmarked ? "bm" : ""}`}
                   style={{ transform: `translateY(${vi.start}px)`, height: ROW_HEIGHT }}
                   onClick={() => setSelected(r)}
                   onKeyDown={(e) => {
@@ -220,6 +235,19 @@ export function QueryPanel() {
                   role="row"
                   aria-selected={isSel}
                 >
+                  <button
+                    type="button"
+                    className={`star ${r.bookmarked ? "on" : ""}`}
+                    aria-label={r.bookmarked ? "북마크 해제" : "북마크"}
+                    aria-pressed={r.bookmarked}
+                    title={r.bookmarked ? "북마크 해제" : "북마크"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void toggleBookmark(r);
+                    }}
+                  >
+                    {r.bookmarked ? "★" : "☆"}
+                  </button>
                   <span className="mono">{formatTime(r.timestamp_utc)}</span>
                   <span className="mono">{r.client_ip ?? "–"}</span>
                   <span>{r.method ?? "–"}</span>
@@ -242,7 +270,13 @@ export function QueryPanel() {
         </div>
       </div>
       {selected && (
-        <DetailPanel key={`${selected.source_id}:${selected.line_number}`} row={selected} jobId={applied?.filter.job_id ?? null} onClose={() => setSelected(null)} />
+        <DetailPanel
+          key={`${selected.source_id}:${selected.line_number}`}
+          row={selected}
+          jobId={applied?.filter.job_id ?? null}
+          onClose={() => setSelected(null)}
+          onToggleBookmark={() => void toggleBookmark(selected)}
+        />
       )}
     </section>
   );

@@ -120,14 +120,6 @@ export const BUILTIN_SOURCES: string[] = [
     condition:
         status >= 500
 }`,
-  `rule not_found
-{
-    meta:
-        name = "찾을 수 없음"
-        description = "상태 404."
-    condition:
-        status == 404
-}`,
   `rule sqlmap
 {
     meta:
@@ -193,16 +185,6 @@ export const BUILTIN_SOURCES: string[] = [
     condition:
         any of them
 }`,
-  `rule login_bruteforce_targets
-{
-    meta:
-        name = "로그인 경로 POST"
-        description = "로그인·인증 경로에 대한 POST. 통계 탭에서 IP별 접근 횟수로 무차별 대입을 확인합니다."
-    strings:
-        $login = /\\/(?:login|signin|sign-in|auth|authenticate|wp-login\\.php|xmlrpc\\.php|administrator\\/index\\.php|admin\\/login|user\\/login|api\\/(?:v\\d\\/)?(?:login|auth|token))/ nocase
-    condition:
-        method == "POST" and path matches $login
-}`,
   `rule unusual_methods
 {
     meta:
@@ -237,7 +219,18 @@ function compileBuiltin(src: string): Rule {
   return { id: `builtin:${r.rule.id}`, name: r.rule.name, description: r.rule.description, source: src, expr: r.rule.expr, builtin: true };
 }
 
-export const BUILTIN_RULES: Rule[] = BUILTIN_SOURCES.map(compileBuiltin);
+/** 룰 목록 맨 위의 북마크 뷰. 조건식이 아니라 북마크 표에 있는 행만 보인다. */
+export const BOOKMARK_RULE: Rule = {
+  id: "builtin:bookmarks",
+  name: "★ 북마크",
+  description: "북마크한 행만 봅니다. 행 앞의 별을 누르면 북마크됩니다.",
+  source: "",
+  expr: { kind: "true" },
+  builtin: true,
+  legacyFilter: { ...emptyFilter(), bookmarked_only: true },
+};
+
+export const BUILTIN_RULES: Rule[] = [BOOKMARK_RULE, ...BUILTIN_SOURCES.map(compileBuiltin)];
 
 /** 룰을 실제 조회 조건으로. 시간·활성 같은 화면 조건은 base로 얹는다. */
 export function ruleFilter(rule: Rule, base: Partial<LogFilter> = {}): LogFilter {

@@ -911,6 +911,11 @@ impl Service {
         self.with_store(|s| Ok(s.delete_view(view_id)?))
     }
 
+    /// 북마크 토글. 켜지면 true. 가져오기 중에는 쓰기 잠금 때문에 거부된다.
+    pub fn toggle_bookmark(&self, source_id: i64, line_number: i64) -> ServiceResult<bool> {
+        self.with_store(|s| Ok(s.toggle_bookmark(source_id, line_number)?))
+    }
+
     // ----- 내보내기 -----
 
     fn ensure_no_export(&self) -> ServiceResult<()> {

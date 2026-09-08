@@ -77,6 +77,22 @@ pub trait ViewQuery: LogQuery {
 impl<T: LogQuery> ViewQuery for T {}
 
 impl Store {
+    /// 북마크를 켜거나 끈다. 켜지면 true. 파일·줄 기준이라 작업(결과 버전)이 달라도 같은 줄이면 함께 표시된다.
+    pub fn toggle_bookmark(&self, source_id: i64, line_number: i64) -> EngineResult<bool> {
+        let removed = self.conn().execute(
+            "DELETE FROM bookmarks WHERE source_id = ? AND line_number = ?",
+            params![source_id, line_number],
+        )?;
+        if removed > 0 {
+            return Ok(false);
+        }
+        self.conn().execute(
+            "INSERT INTO bookmarks (source_id, line_number) VALUES (?, ?)",
+            params![source_id, line_number],
+        )?;
+        Ok(true)
+    }
+
     /// 뷰를 저장한다. 같은 이름이 있으면 덮어쓴다.
     pub fn save_view(&self, name: &str, definition: &ViewDefinition) -> EngineResult<SavedView> {
         let name = name.trim();
