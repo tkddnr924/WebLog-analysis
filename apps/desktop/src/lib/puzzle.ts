@@ -43,6 +43,10 @@ export interface RoleDef {
   tail?: TailItem[];
   /** 자주 쓰지 않는 라벨. 팔레트에서 "그 외"로 내려간다. */
   rare?: boolean;
+  /** 공백 구분일 때 토큰 대신 쓸 정확한 패턴(예: 연결 번호 `\\*\\d+`). */
+  pattern?: string;
+  /** 줄에 없을 수도 있는 조각. 앞 공백과 함께 선택 그룹으로 만든다. */
+  optional?: boolean;
 }
 
 export type LogKind = "access" | "error";
@@ -204,7 +208,7 @@ const NGINX_ERROR: RoleDef[] = [
   { id: "err_time", label: "발생 시각", hint: "2026/09/06 00:49:09 (서버 로컬 시간, 오프셋 없음)", group: "time", kind: "timestamp", name: "timestamp", ts: { kind: "custom", pattern: "%Y/%m/%d %H:%M:%S" } },
   { id: "err_level", label: "레벨", hint: "[debug] [info] [notice] [warn] [error] [crit] [alert] [emerg]", group: "response", kind: "text", name: "level" },
   { id: "err_pid", label: "프로세스#스레드", hint: "워커 PID#TID (1234#0:)", group: "server", kind: "text", name: "pid_tid" },
-  { id: "err_conn", label: "연결 번호", hint: "*5 — 접근 로그의 $connection과 같은 값", group: "server", kind: "text", name: "connection" },
+  { id: "err_conn", label: "연결 번호", hint: "*5 — 접근 로그의 $connection과 같은 값. 없는 줄(notice 등)도 있어 선택 항목", group: "server", kind: "text", name: "connection", pattern: "\\*\\d+", optional: true },
   {
     id: "message_detail",
     label: "메시지 + 상세 분리",
@@ -446,7 +450,14 @@ export function rolesFromProfile(profile: FormatProfile, pieces: Piece[], vocab:
       }
       fields.push({ role: roleForKind(vocab, b.kind, b.name), tsFormat: b.kind.kind === "timestamp" ? b.kind.format : DEFAULT_TS });
     } else if (b.block === "regex") fields.push({ role: "ignore", tsFormat: DEFAULT_TS });
-    else if (b.block === "optional_group") break;
+    else if (b.block === "optional_group") {
+      // 퍼즐이 만든 선택 조각([공백, 필드])은 그 필드의 라벨로 되돌린다. 그 외 선택 그룹은 지원하지 않는다.
+      const inner = b.blocks.filter((x) => x.block !== "whitespace");
+      if (inner.length === 1 && inner[0].block === "field") {
+        const f = inner[0];
+        fields.push({ role: roleForKind(vocab, f.kind, f.name), tsFormat: DEFAULT_TS });
+      } else break;
+    }
   }
   return pieces.map((_, i) => fields[i] ?? { role: "ignore", tsFormat: DEFAULT_TS });
 }
@@ -589,10 +600,26 @@ export function buildBlocks(pieces: Piece[], roles: RoleAssign[], sep: Separator
   const restAt = restIndex(roles, vocab);
   pieces.forEach((piece, i) => {
     if (restAt !== null && i > restAt) return;
-    if (i > 0) blocks.push(sepChar === null ? { block: "whitespace" } : { block: "literal", text: sepChar });
     const a = roles[i] ?? { role: "ignore", tsFormat: DEFAULT_TS };
     const def = roleDef(vocab, a.role);
     const kind = def?.kind ?? "text";
+    // 선택 조각: 앞 공백과 필드를 선택 그룹으로 묶는다(공백 구분·정확한 패턴이 있을 때만).
+    if (def?.optional && def.pattern && sepChar === null && i > 0 && kind !== "ignore" && !def.rest) {
+      const base = def.name ?? sanitizeName(a.role);
+      let name = base;
+      let n = 2;
+      while (names.has(name)) name = `${base}_${n++}`;
+      names.add(name);
+      blocks.push({
+        block: "optional_group",
+        blocks: [
+          { block: "whitespace" },
+          { block: "field", name, kind: { kind } as FieldKind, capture: { kind: "pattern", pattern: def.pattern }, missing: ["-"] },
+        ],
+      });
+      return;
+    }
+    if (i > 0) blocks.push(sepChar === null ? { block: "whitespace" } : { block: "literal", text: sepChar });
     if (kind === "ignore") {
       blocks.push({ block: "regex", pattern: ignorePattern(piece, sepChar) });
       return;
@@ -624,7 +651,7 @@ export function buildBlocks(pieces: Piece[], roles: RoleAssign[], sep: Separator
       block: "field",
       name,
       kind: fieldKind,
-      capture: captureFor(piece, sepChar),
+      capture: def?.pattern && sepChar === null ? { kind: "pattern", pattern: def.pattern } : captureFor(piece, sepChar),
       missing: sepChar === null ? ["-"] : ["-", ""],
     });
   });

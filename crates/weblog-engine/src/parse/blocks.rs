@@ -35,6 +35,12 @@ impl BlocksParser {
             };
         }
         let Some(captured) = self.compiled.capture(line) else {
+            if is_continuation(line) {
+                return LineOutcome::Skipped {
+                    line_number,
+                    reason: SkipReason::Continuation,
+                };
+            }
             return LineOutcome::error(line_number, ParseErrorCode::NoMatch, None);
         };
         let mut record = LogRecord {
@@ -55,6 +61,21 @@ impl BlocksParser {
         }
         LineOutcome::Record(record)
     }
+}
+
+/// 포맷에 맞지 않는 줄이 앞 레코드의 이어지는 줄인지. PHP·Java·Python 스택 트레이스와 들여쓴 줄을 본다.
+/// 로그 줄은 시각이나 IP로 시작하므로, 공백·`#`·`at `·`Stack trace`·`thrown`·`Caused by`·`Traceback`로 시작하면 이어지는 줄로 본다.
+fn is_continuation(line: &str) -> bool {
+    let t = line.trim_end();
+    t.starts_with(' ')
+        || t.starts_with('\t')
+        || t.starts_with('#')
+        || t.starts_with("at ")
+        || t.starts_with("Stack trace")
+        || t.starts_with("thrown")
+        || t.starts_with("Caused by")
+        || t.starts_with("Traceback")
+        || t.starts_with("...")
 }
 
 fn apply_field(
@@ -198,5 +219,33 @@ mod tests {
             panic!("expected record");
         };
         assert_eq!(r.client_ip.as_deref(), Some("2001:db8::ff00:42:8329"));
+    }
+
+    #[test]
+    fn stack_trace_lines_are_skipped_as_continuation_not_errors() {
+        let parser = combined_parser();
+        for line in [
+            "#0 /var/www/html/app/Http/Controllers/GpController.php(1220): app\\Models\\Company->detailInfo()",
+            "    at java.base/java.lang.Thread.run(Thread.java:833)",
+            "Stack trace:",
+            "thrown in /var/www/html/index.php on line 12",
+            "Caused by: java.io.IOException",
+            "Traceback (most recent call last):",
+        ] {
+            assert!(
+                matches!(
+                    parser.parse_line(1, line),
+                    LineOutcome::Skipped {
+                        reason: SkipReason::Continuation,
+                        ..
+                    }
+                ),
+                "{line}"
+            );
+        }
+        assert!(matches!(
+            parser.parse_line(1, "garbage that is not a log line"),
+            LineOutcome::Error { .. }
+        ));
     }
 }

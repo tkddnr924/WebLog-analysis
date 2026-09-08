@@ -281,6 +281,10 @@ impl Service {
         if wal.exists() {
             let _ = std::fs::remove_file(wal);
         }
+        let tmp = target.with_extension("duckdb.tmp");
+        if tmp.is_dir() {
+            let _ = std::fs::remove_dir_all(tmp);
+        }
         Ok(())
     }
 
@@ -290,7 +294,15 @@ impl Service {
         self.ensure_no_export()?;
         // 기존 프로젝트를 먼저 닫아 같은 파일을 두 번 여는 일을 막는다.
         *lock(&self.project) = None;
-        let (project, interrupted) = Project::open(db_path, &self.cfg.store, self.cfg.readers)?;
+        // 임시 디렉터리가 설정에 없으면 DB 옆 `<이름>.tmp`를 쓴다. DuckDB가 정렬·집계 중 메모리 상한에 걸리면 여기로 넘긴다.
+        let mut store_cfg = self.cfg.store.clone();
+        if store_cfg.temp_directory.is_none() {
+            let tmp = db_path.with_extension("duckdb.tmp");
+            if std::fs::create_dir_all(&tmp).is_ok() {
+                store_cfg.temp_directory = Some(tmp);
+            }
+        }
+        let (project, interrupted) = Project::open(db_path, &store_cfg, self.cfg.readers)?;
         let project = Arc::new(project);
         *lock(&self.project) = Some(Arc::clone(&project));
         self.project_info(&project, interrupted)

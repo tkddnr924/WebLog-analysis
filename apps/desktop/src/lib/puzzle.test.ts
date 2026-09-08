@@ -174,22 +174,26 @@ describe("error logs", () => {
     expect(restIndex(roles, NGE)).toBe(4);
     const blocks = buildBlocks(pieces, roles, "space", NGE);
     const fields = blocks.filter((b) => b.block === "field") as { name: string; capture: { kind: string; pattern?: string }; kind: { kind: string; format?: { kind: string; pattern?: string } } }[];
-    expect(fields.map((f) => f.name)).toEqual(["timestamp", "level", "pid_tid", "connection", "message"]);
+    expect(fields.map((f) => f.name)).toEqual(["timestamp", "level", "pid_tid", "message"]);
+    // 연결 번호는 없는 줄도 있으므로 [공백, *숫자] 선택 그룹이다.
+    const conn = blocks.find((b) => b.block === "optional_group" && b.blocks.some((x) => x.block === "field" && x.name === "connection"));
+    expect(conn).toEqual({ block: "optional_group", blocks: [{ block: "whitespace" }, { block: "field", name: "connection", kind: { kind: "text" }, capture: { kind: "pattern", pattern: "\\*\\d+" }, missing: ["-"] }] });
     expect(fields[0].capture).toEqual({ kind: "pattern", pattern: "\\S+ \\S+" });
     expect(fields[0].kind.format).toEqual({ kind: "custom", pattern: "%Y/%m/%d %H:%M:%S" });
     const msg = blocks.find((b) => b.block === "field" && b.name === "message");
     expect(msg).toMatchObject({ capture: { kind: "pattern", pattern: ".*?" } });
     const groups = blocks.filter((b) => b.block === "optional_group");
-    expect(groups).toHaveLength(6);
-    expect(groups[0]).toEqual({
+    // 연결 번호 선택 그룹 1개 + 꼬리 항목 6개
+    expect(groups).toHaveLength(7);
+    expect(groups[1]).toEqual({
       block: "optional_group",
       blocks: [
         { block: "literal", text: ", client: " },
         { block: "field", name: "client_ip", kind: { kind: "client_ip" }, capture: { kind: "pattern", pattern: "[^,]+" }, missing: ["-"] },
       ],
     });
-    expect(groups[2].block === "optional_group" && groups[2].blocks[0]).toEqual({ block: "literal", text: ', request: "' });
-    expect(groups[2].block === "optional_group" && groups[2].blocks[2]).toEqual({ block: "literal", text: '"' });
+    expect(groups[3].block === "optional_group" && groups[3].blocks[0]).toEqual({ block: "literal", text: ', request: "' });
+    expect(groups[3].block === "optional_group" && groups[3].blocks[2]).toEqual({ block: "literal", text: '"' });
     const labels = tailLabels(pieces, restIndex(roles, NGE)!, vocabFor("nginx", "error").find((r) => r.id === "message_detail")!.tail!);
     const clientKey = pieces.findIndex((p) => p.text === "client:");
     expect(labels.get(clientKey)).toEqual({ label: "클라이언트 IP", kind: "client_ip" });

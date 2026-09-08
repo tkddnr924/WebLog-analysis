@@ -103,6 +103,8 @@ pub enum SkipReason {
     Blank,
     /// 주석·헤더 지시문.
     Directive,
+    /// 앞 레코드에 이어지는 줄(스택 트레이스 등). 멀티라인은 지원하지 않으므로 건너뛴다.
+    Continuation,
 }
 
 /// 한 줄의 처리 결과.
