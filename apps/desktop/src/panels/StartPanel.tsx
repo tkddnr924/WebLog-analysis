@@ -506,9 +506,22 @@ function PatternForm({
 
 /** 머리줄 요약: 모두 확인됐으면 한마디, 아니면 문제 수. */
 function fileSummary(files: ScannedFile[], majority: string): ReactNode {
-  const off = files.filter((f) => f.best_profile !== majority).length;
-  if (off === 0) return <span className="ok"> · 모두 같은 포맷</span>;
-  return <span className="warn"> · {formatCount(off)}개는 포맷이 다르거나 판별되지 않음</span>;
+  const empty = files.filter((f) => f.file_size === 0).length;
+  const off = files.filter((f) => f.file_size > 0 && f.best_profile !== majority).length;
+  const emptyNote = empty > 0 ? <span className="muted"> · 빈 파일 {formatCount(empty)}개</span> : null;
+  if (off === 0)
+    return (
+      <>
+        <span className="ok"> · 모두 같은 포맷</span>
+        {emptyNote}
+      </>
+    );
+  return (
+    <>
+      <span className="warn"> · {formatCount(off)}개는 포맷이 다르거나 판별되지 않음</span>
+      {emptyNote}
+    </>
+  );
 }
 
 function FileRow({ f, root, majority, checked, onToggle }: { f: ScannedFile; root: string; majority: string | null; checked: boolean; onToggle: () => void }) {
