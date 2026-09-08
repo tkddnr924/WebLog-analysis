@@ -166,6 +166,14 @@ export function StartPanel() {
     }
   };
 
+  /** 탐색 결과와 선택을 비우고 폴더 선택 화면으로 돌아간다. 서버 종류는 유지한다. */
+  const goHome = () => {
+    const reset = (sel: typeof selection) => ({ ...sel, root: "", scan: null, files: [], profile: null });
+    setSelections({ access: reset(selections.access), error: reset(selections.error) });
+    setSample(null);
+    setNotice(null);
+  };
+
   const pickFolder = async () => {
     try {
       const p = await open({ directory: true, multiple: false });
@@ -356,6 +364,9 @@ export function StartPanel() {
         <CasesPanel />
       ) : (
         <div className="start-bar">
+          <button onClick={goHome} disabled={scanning} title="탐색 결과를 지우고 처음 화면으로" aria-label="홈">
+            ⌂ 홈
+          </button>
           <div className="seg" role="group" aria-label="서버 종류">
             {SERVERS.map((sv) => (
               <button key={sv.id} className={selection.server === sv.id ? "on" : ""} onClick={() => chooseServer(sv.id)} disabled={scanning}>

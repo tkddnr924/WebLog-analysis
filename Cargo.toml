@@ -39,4 +39,9 @@ unwrap_used = "warn"
 expect_used = "warn"
 
 [profile.release]
-debug = 1
+# 배포 실행 파일 크기를 줄인다. DuckDB(C++)는 그대로지만 Rust 쪽은 LTO·심볼 제거로 작아진다. 벤치 재현이 필요하면 debug = 1로 되돌린다.
+debug = false
+strip = true
+lto = "fat"
+codegen-units = 1
+panic = "abort"
