@@ -309,6 +309,28 @@ export function StartPanel() {
     return kind === "error" ? null : { kind: "preset", name: sel.profileName };
   };
 
+  /**
+   * 정의가 없는 탭(주로 에러 로그를 열어 보지 않았거나 샘플이 비어 있던 경우)의 정의를 그 자리에서 만든다.
+   * 화면과 같은 방식: 내용 있는 파일의 첫 줄을 읽어 라벨을 추정하고 정의로 컴파일한다.
+   */
+  const autoProfile = async (kind: LogKind): Promise<ProfileSpec | null> => {
+    const sel = selections[kind];
+    const files = sel.files.filter((f) => f.file_size > 0 && !f.detect_error).sort((a, b) => b.file_size - a.file_size);
+    for (const f of files.slice(0, 8)) {
+      const lines = await api.sampleLines(f.path, SAMPLE_LINES);
+      const line = lines.lines.find((l) => l.text !== null && l.text.trim() !== "")?.text;
+      if (!line) continue;
+      const v = vocabFor(sel.server, kind);
+      const sp = guessSeparator(line);
+      const np = tokenize(line, sp);
+      const rs = kind === "error" ? guessErrorRoles(np, v) : guessRoles(np, v);
+      const built = buildProfile(null, sel.server, np, rs, sp, v, kind);
+      setSelections({ ...selections, [kind]: { ...sel, profile: built } });
+      return { kind: "definition", profile: built };
+    }
+    return null;
+  };
+
   /** 접근 로그 → 에러 로그 순서로 큐에 넣어 한 번에 파싱한다. */
   const start = async () => {
     const items: ImportItem[] = [];
@@ -316,7 +338,14 @@ export function StartPanel() {
     for (const k of KINDS) {
       const sel = selections[k.id];
       if (sel.files.length === 0) continue;
-      const sp = specFor(k.id);
+      let sp = specFor(k.id);
+      if (!sp) {
+        try {
+          sp = await autoProfile(k.id);
+        } catch (e) {
+          setNotice(errorText(e));
+        }
+      }
       if (!sp) {
         skipped.push(k.label);
         continue;
@@ -324,7 +353,7 @@ export function StartPanel() {
       items.push({ label: k.label, request: { profile: sp, paths: sel.files.map((f) => f.path), replaces_job_id: null, batch_max_rows: null, batch_max_bytes: null } });
     }
     if (items.length === 0) {
-      setNotice(skipped.length > 0 ? `${skipped.join(", ")} 탭을 열어 포맷을 먼저 확인하세요.` : "가져올 파일을 하나 이상 선택하세요.");
+      setNotice(skipped.length > 0 ? `${skipped.join(", ")}에 읽을 수 있는 줄이 없습니다.` : "가져올 파일을 하나 이상 선택하세요.");
       return;
     }
     setStarting(true);
@@ -334,7 +363,7 @@ export function StartPanel() {
       await createCase(baseName(selection.root));
       clearFinished();
       setStage("importing");
-      if (skipped.length > 0) setNotice(`${skipped.join(", ")}는 포맷을 확인하지 않아 건너뜁니다.`);
+      if (skipped.length > 0) setNotice(`${skipped.join(", ")}는 읽을 수 있는 줄이 없어 건너뜁니다(파일이 비어 있음).`);
       await startImports(items);
     } catch (e) {
       setNotice(errorText(e));
