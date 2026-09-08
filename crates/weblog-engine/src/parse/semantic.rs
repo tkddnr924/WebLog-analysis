@@ -31,19 +31,28 @@ pub fn parse_status(raw: &str) -> Option<u16> {
 /// 요청문을 method/target/protocol로 분해한다.
 /// 형식이 어긋나면 손실 없이 전체를 target으로 둔다.
 pub fn split_request_line(raw: &str) -> (Option<String>, Option<String>, Option<String>) {
-    let mut parts = raw.splitn(3, ' ');
-    let a = parts.next().unwrap_or_default();
-    let b = parts.next();
-    let c = parts.next();
-    match (b, c) {
-        (Some(target), Some(proto)) if is_method(a) && proto.starts_with("HTTP/") => (
-            Some(a.to_owned()),
-            Some(target.to_owned()),
-            Some(proto.to_owned()),
-        ),
-        (Some(target), None) if is_method(a) => (Some(a.to_owned()), Some(target.to_owned()), None),
-        _ => (None, Some(raw.to_owned()), None),
+    // 메서드는 첫 토큰, 프로토콜은 마지막 토큰(HTTP/…)이고 대상은 그 사이 전부다.
+    // 공격 요청은 대상 안에 공백이 그대로 들어올 수 있어(`/?id=1' OR '1'='1`) 토큰 수로 나누지 않는다.
+    let Some((method, rest)) = raw.split_once(' ') else {
+        return if is_method(raw) {
+            (Some(raw.to_owned()), None, None)
+        } else {
+            (None, Some(raw.to_owned()), None)
+        };
+    };
+    if !is_method(method) {
+        return (None, Some(raw.to_owned()), None);
     }
+    let (target, proto) = match rest.rsplit_once(' ') {
+        Some((t, p)) if p.starts_with("HTTP/") => (t, Some(p.to_owned())),
+        _ => (rest, None),
+    };
+    let target = if target.is_empty() {
+        None
+    } else {
+        Some(target.to_owned())
+    };
+    (Some(method.to_owned()), target, proto)
 }
 
 fn is_method(token: &str) -> bool {
@@ -226,5 +235,27 @@ mod tests {
         assert_eq!(m, None);
         assert_eq!(t.as_deref(), Some("\\x16\\x03 garbage with spaces"));
         assert_eq!(p, None);
+    }
+
+    #[test]
+    fn request_line_keeps_spaces_inside_target() {
+        let (m, t, p) = split_request_line("GET /?id=1' OR '1'='1 HTTP/1.1");
+        assert_eq!(m.as_deref(), Some("GET"));
+        assert_eq!(t.as_deref(), Some("/?id=1' OR '1'='1"));
+        assert_eq!(p.as_deref(), Some("HTTP/1.1"));
+        let (m, t, p) = split_request_line("GET /index.html HTTP/1.0");
+        assert_eq!(
+            (m.as_deref(), t.as_deref(), p.as_deref()),
+            (Some("GET"), Some("/index.html"), Some("HTTP/1.0"))
+        );
+        let (m, t, p) = split_request_line("POST /a b c");
+        assert_eq!(
+            (m.as_deref(), t.as_deref(), p.as_deref()),
+            (Some("POST"), Some("/a b c"), None)
+        );
+        let (m, t, p) = split_request_line("\x16\x03\x01");
+        assert_eq!((m, t.as_deref(), p), (None, Some("\x16\x03\x01"), None));
+        let (m, t, p) = split_request_line("OPTIONS");
+        assert_eq!((m.as_deref(), t, p), (Some("OPTIONS"), None, None));
     }
 }
