@@ -296,8 +296,8 @@ td.ok { color: var(--s2); }
 .star:hover { color: var(--bm-ink); background: var(--bm); }
 .star.on { color: var(--bm-ink); }
 .star.big { width: 28px; height: 28px; font-size: 18px; }
-.rule-item.bookmark { border-color: var(--bm-line); background: var(--bm); color: var(--bm-ink); font-weight: 500; }
-.rule-item.bookmark.on { background: #f7e59a; border-color: var(--bm-ink); }
+.rule-star { color: var(--bm-ink); font-size: 13px; line-height: 1; margin-right: 2px; }
+.rules-divider { height: 1px; margin: 4px 6px 6px; background: var(--line); }
 .vrow > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { display: inline-block; padding: 0 7px; border-radius: 4px; font-variant-numeric: tabular-nums; text-align: center; font-weight: 500; }
 .chip.s2 { background: #dcefe4; color: #2f6b4d; }

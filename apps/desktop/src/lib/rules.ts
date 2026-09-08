@@ -222,7 +222,7 @@ function compileBuiltin(src: string): Rule {
 /** 룰 목록 맨 위의 북마크 뷰. 조건식이 아니라 북마크 표에 있는 행만 보인다. */
 export const BOOKMARK_RULE: Rule = {
   id: "builtin:bookmarks",
-  name: "★ 북마크",
+  name: "북마크",
   description: "북마크한 행만 봅니다. 행 앞의 별을 누르면 북마크됩니다.",
   source: "",
   expr: { kind: "true" },

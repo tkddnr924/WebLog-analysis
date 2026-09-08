@@ -1,5 +1,5 @@
 // 분석 룰 사이드바. 기본 룰과 사용자 룰(저장된 뷰)을 나열하고, 고른 룰의 조건을 조회·통계에 적용한다.
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { useAppState } from "../state";
 import { BUILTIN_RULES, ruleFilter, ruleFromView, type Rule } from "../lib/rules";
@@ -89,8 +89,11 @@ export function RulesSidebar() {
         </button>
       </div>
       <div className="rules-list" role="listbox" aria-label="룰 목록">
-        {BUILTIN_RULES.map((r) => (
-          <RuleItem key={r.id} r={r} on={r.id === selected} onPick={() => pick(r)} onOpen={r.source ? () => setEditor({ mode: "edit", rule: r }) : undefined} />
+        {BUILTIN_RULES.map((r, i) => (
+          <Fragment key={r.id}>
+            <RuleItem r={r} on={r.id === selected} onPick={() => pick(r)} onOpen={r.source ? () => setEditor({ mode: "edit", rule: r }) : undefined} />
+            {i === 0 && <div className="rules-divider" aria-hidden="true" />}
+          </Fragment>
         ))}
         {custom.length > 0 && <div className="rules-sep">내 룰</div>}
         {custom.map((r) => (
@@ -115,6 +118,11 @@ function RuleItem({ r, on, onPick, onOpen }: { r: Rule; on: boolean; onPick: () 
   const bookmark = r.id === "builtin:bookmarks";
   return (
     <div className={`rule-item ${on ? "on" : ""} ${r.error ? "broken" : ""} ${bookmark ? "bookmark" : ""}`} role="option" aria-selected={on} title={r.description} onClick={onPick} onDoubleClick={onOpen}>
+      {bookmark && (
+        <span className="rule-star" aria-hidden="true">
+          ★
+        </span>
+      )}
       <span className="rule-name">{r.name}</span>
       {onOpen && (
         <button
