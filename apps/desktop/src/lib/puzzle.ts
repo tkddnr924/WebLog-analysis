@@ -1,5 +1,5 @@
 // 퍼즐 매핑: 샘플 한 줄을 조각으로 나누고, 조각마다 붙인 라벨(서버별 로그 변수)로 프로필 정의를 만든다. 순수 함수, 테스트 대상.
-import type { Block, Capture, FieldKind, FormatProfile, ServerHint, TimestampFormat } from "../types";
+import type { Block, Capture, FieldKind, FormatProfile, LogKind, ServerHint, TimestampFormat } from "../types";
 
 export type Separator = "space" | "|" | "," | ";" | "tab";
 
@@ -39,8 +39,6 @@ export interface RoleDef {
   /** 줄에 없을 수도 있는 조각. 앞 공백과 함께 선택 그룹으로 만든다. */
   optional?: boolean;
 }
-
-export type LogKind = "access" | "error";
 
 /** 메시지 뒤에 선택적으로 붙는 `, key: value` 항목. 값이 따옴표로 감싸이면 quoted. */
 export interface TailItem {

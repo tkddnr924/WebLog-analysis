@@ -11,7 +11,7 @@ const KEYWORDS = new Set([
   "rule", "meta", "strings", "condition", "and", "or", "not", "in", "any", "all", "of", "them", "is", "null", "empty", "nocase", "ascii", "wide", "true", "false",
   "contains", "icontains", "startswith", "endswith", "matches",
 ]);
-export const FIELDS = new Set(["status", "bytes", "bytes_sent", "method", "ip", "client_ip", "path", "url", "target", "request_target", "protocol", "referrer", "referer", "ua", "user_agent"]);
+export const FIELDS = new Set(["status", "bytes", "bytes_sent", "method", "ip", "client_ip", "path", "url", "target", "request_target", "protocol", "referrer", "referer", "ua", "user_agent", "level", "message", "msg"]);
 
 /** 한 줄씩 색칠한다. 블록 주석은 줄을 넘어갈 수 있어 상태를 넘긴다. */
 export function highlightLines(src: string): HlToken[][] {
@@ -123,6 +123,6 @@ export function completions(word: string, strings: string[]): string[] {
   }
   const p = word.toLowerCase();
   if (p === "") return [];
-  const pool = ["status", "bytes", "method", "ip", "path", "protocol", "referrer", "ua", "contains", "icontains", "startswith", "endswith", "matches", "in", "is null", "is not null", "and", "or", "not", "any of them", "all of them", "nocase", "true", "false", "meta:", "strings:", "condition:"];
+  const pool = ["status", "bytes", "method", "ip", "path", "protocol", "referrer", "ua", "level", "message", "contains", "icontains", "startswith", "endswith", "matches", "in", "is null", "is not null", "and", "or", "not", "any of them", "all of them", "nocase", "true", "false", "meta:", "strings:", "condition:"];
   return pool.filter((k) => k.startsWith(p) && k !== p);
 }

@@ -5,7 +5,7 @@ use duckdb::{params, Connection, OptionalExt};
 use crate::error::{EngineError, EngineResult};
 
 /// 현재 스키마 버전.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const V1: &str = r#"
 CREATE TABLE IF NOT EXISTS sources (
@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS import_jobs (
     committed_skipped BIGINT NOT NULL DEFAULT 0,
     failure_reason    VARCHAR,
     active            BOOLEAN DEFAULT TRUE,
-    replaces_job_id   BIGINT
+    replaces_job_id   BIGINT,
+    log_kind          VARCHAR
 );
 CREATE TABLE IF NOT EXISTS import_job_sources (
     job_id     BIGINT NOT NULL,
@@ -123,8 +124,15 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 );
 "#;
 
+/// v4: 작업의 로그 종류(access|error). 값이 없는 기존 작업은 프로필 이름으로 채우고 나머지는 접근 로그로 본다.
+const V4: &str = r#"
+ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS log_kind VARCHAR;
+UPDATE import_jobs SET log_kind = 'error' WHERE log_kind IS NULL AND profile_id IN (SELECT profile_id FROM parser_profiles WHERE name LIKE 'error_log%');
+UPDATE import_jobs SET log_kind = 'access' WHERE log_kind IS NULL;
+"#;
+
 /// 마이그레이션 목록. 인덱스 0이 버전 1이다.
-const MIGRATIONS: &[&str] = &[V1, V2, V3];
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
 
 /// 스키마를 최신 버전으로 올린다. 저장소가 엔진보다 새 버전이면 오류.
 pub fn migrate(conn: &Connection) -> EngineResult<()> {
@@ -221,6 +229,35 @@ mod tests {
             })
             .unwrap();
         assert!(active, "existing jobs stay active after upgrade");
+    }
+
+    #[test]
+    fn v3_store_upgrades_to_v4_backfilling_log_kind() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_to(&conn, 3).unwrap();
+        for (id, name) in [(1i64, "apache_combined"), (2, "error_log_edit")] {
+            conn.execute(
+                "INSERT INTO parser_profiles (profile_id, name, version, definition_json, definition_hash) VALUES (?, ?, 1, '{}', ?)",
+                params![id, name, name],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO import_jobs (job_id, result_version, status, profile_id, started_at) VALUES (?, ?, 'completed', ?, current_timestamp)",
+                params![id, id, id],
+            )
+            .unwrap();
+        }
+        migrate(&conn).unwrap();
+        let kind = |job_id: i64| -> String {
+            conn.query_row(
+                "SELECT log_kind FROM import_jobs WHERE job_id = ?",
+                params![job_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(kind(1), "access", "접근 로그 프로필은 access로 채운다");
+        assert_eq!(kind(2), "error", "이름이 error_log인 프로필은 error");
     }
 
     #[test]

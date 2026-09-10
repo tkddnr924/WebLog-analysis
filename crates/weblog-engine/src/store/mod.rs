@@ -9,7 +9,7 @@ pub mod views;
 use std::path::{Path, PathBuf};
 
 use duckdb::{params, Connection, OptionalExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{EngineError, EngineResult};
 use crate::format::FormatProfile;
@@ -96,6 +96,36 @@ impl JobStatus {
     }
 }
 
+/// 로그 종류. 접근 로그와 에러 로그는 컬럼 구성이 달라 화면에서 나눠 본다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogKind {
+    /// 접근 로그.
+    #[default]
+    Access,
+    /// 에러 로그.
+    Error,
+}
+
+impl LogKind {
+    /// 저장용 문자열.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Access => "access",
+            Self::Error => "error",
+        }
+    }
+
+    /// 문자열에서 복원한다. 값이 없거나 모르는 값이면 접근 로그로 본다.
+    pub fn parse(s: &str) -> Self {
+        if s == "error" {
+            Self::Error
+        } else {
+            Self::Access
+        }
+    }
+}
+
 /// 생성된 작업 식별자.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JobHandle {
@@ -116,6 +146,8 @@ pub struct JobInfo {
     pub status: JobStatus,
     /// 프로필 ID.
     pub profile_id: i64,
+    /// 로그 종류.
+    pub log_kind: LogKind,
     /// 확정 레코드 수.
     pub committed_records: i64,
     /// 확정 오류 수.
@@ -364,6 +396,7 @@ impl Store {
         profile_id: i64,
         source_ids: &[i64],
         replaces_job_id: Option<i64>,
+        log_kind: LogKind,
     ) -> EngineResult<JobHandle> {
         if let Some(prev) = replaces_job_id {
             self.job(prev)?;
@@ -371,14 +404,15 @@ impl Store {
         let job_id = self.next_id("import_jobs", "job_id")?;
         let result_version = self.next_id("import_jobs", "result_version")?;
         self.conn.execute(
-            "INSERT INTO import_jobs (job_id, result_version, status, profile_id, started_at, active, replaces_job_id) VALUES (?, ?, ?, ?, current_timestamp, ?, ?)",
+            "INSERT INTO import_jobs (job_id, result_version, status, profile_id, started_at, active, replaces_job_id, log_kind) VALUES (?, ?, ?, ?, current_timestamp, ?, ?, ?)",
             params![
                 job_id,
                 result_version,
                 JobStatus::Running.as_str(),
                 profile_id,
                 replaces_job_id.is_none(),
-                replaces_job_id
+                replaces_job_id,
+                log_kind.as_str()
             ],
         )?;
         for (ordinal, source_id) in source_ids.iter().enumerate() {
@@ -566,15 +600,17 @@ pub(crate) fn next_id(conn: &Connection, table: &str, column: &str) -> EngineRes
     Ok(v)
 }
 
-pub(crate) const JOB_SELECT: &str = "SELECT job_id, result_version, status, profile_id, committed_records, committed_errors, committed_skipped, active, replaces_job_id, failure_reason FROM import_jobs";
+pub(crate) const JOB_SELECT: &str = "SELECT job_id, result_version, status, profile_id, committed_records, committed_errors, committed_skipped, active, replaces_job_id, failure_reason, log_kind FROM import_jobs";
 
 pub(crate) fn map_job(r: &duckdb::Row<'_>) -> duckdb::Result<JobInfo> {
     let status: String = r.get(2)?;
+    let kind: Option<String> = r.get(10)?;
     Ok(JobInfo {
         job_id: r.get(0)?,
         result_version: r.get(1)?,
         status: JobStatus::parse(&status).unwrap_or(JobStatus::Failed),
         profile_id: r.get(3)?,
+        log_kind: kind.as_deref().map_or(LogKind::Access, LogKind::parse),
         committed_records: r.get(4)?,
         committed_errors: r.get(5)?,
         committed_skipped: r.get(6)?,
@@ -644,8 +680,8 @@ mod tests {
     fn interrupted_marking_only_touches_running_jobs() {
         let s = store();
         let p = s.upsert_profile(&presets::apache_combined()).unwrap();
-        let a = s.create_job(p, &[], None).unwrap();
-        let b = s.create_job(p, &[], None).unwrap();
+        let a = s.create_job(p, &[], None, LogKind::Access).unwrap();
+        let b = s.create_job(p, &[], None, LogKind::Access).unwrap();
         s.finish_job(b.job_id, JobStatus::Completed, None).unwrap();
         assert_eq!(s.mark_interrupted_jobs().unwrap(), vec![a.job_id]);
         assert_eq!(s.job(a.job_id).unwrap().status, JobStatus::Interrupted);
@@ -656,10 +692,12 @@ mod tests {
     fn reparse_job_starts_inactive_and_activation_swaps_with_replaced_job() {
         let s = store();
         let p = s.upsert_profile(&presets::apache_combined()).unwrap();
-        let first = s.create_job(p, &[], None).unwrap();
+        let first = s.create_job(p, &[], None, LogKind::Access).unwrap();
         s.finish_job(first.job_id, JobStatus::Completed, None)
             .unwrap();
-        let second = s.create_job(p, &[], Some(first.job_id)).unwrap();
+        let second = s
+            .create_job(p, &[], Some(first.job_id), LogKind::Access)
+            .unwrap();
         assert!(!s.job(second.job_id).unwrap().active);
         assert!(
             s.activate_job(second.job_id).is_err(),
@@ -676,11 +714,13 @@ mod tests {
     fn active_completed_job_cannot_be_deleted_but_inactive_can() {
         let s = store();
         let p = s.upsert_profile(&presets::apache_combined()).unwrap();
-        let first = s.create_job(p, &[], None).unwrap();
+        let first = s.create_job(p, &[], None, LogKind::Access).unwrap();
         s.finish_job(first.job_id, JobStatus::Completed, None)
             .unwrap();
         assert!(s.delete_job_results(first.job_id).is_err());
-        let second = s.create_job(p, &[], Some(first.job_id)).unwrap();
+        let second = s
+            .create_job(p, &[], Some(first.job_id), LogKind::Access)
+            .unwrap();
         s.finish_job(second.job_id, JobStatus::Completed, None)
             .unwrap();
         s.activate_job(second.job_id).unwrap();
@@ -725,7 +765,7 @@ mod tests {
         let (_a, ida) = temp_source(&s, b"a\n");
         let (_b, idb) = temp_source(&s, b"b\n");
         let p = s.upsert_profile(&presets::apache_combined()).unwrap();
-        let job = s.create_job(p, &[idb, ida], None).unwrap();
+        let job = s.create_job(p, &[idb, ida], None, LogKind::Access).unwrap();
         let list = s.job_sources(job.job_id).unwrap();
         assert_eq!(
             list.iter().map(|j| j.source_id).collect::<Vec<_>>(),
@@ -739,7 +779,7 @@ mod tests {
         let mut s = store();
         let p = s.upsert_profile(&presets::apache_combined()).unwrap();
         let (_f, sid) = temp_source(&s, b"x\n");
-        let job = s.create_job(p, &[sid], None).unwrap();
+        let job = s.create_job(p, &[sid], None, LogKind::Access).unwrap();
         let reader = s.open_reader().unwrap();
         let batch = PendingBatch {
             job_id: job.job_id,

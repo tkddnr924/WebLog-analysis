@@ -4,7 +4,7 @@ use duckdb::types::Value;
 use duckdb::{params_from_iter, OptionalExt};
 use serde::{Deserialize, Serialize};
 
-use super::{map_job, parse_compression, JobInfo, JobSource, Store, JOB_SELECT};
+use super::{map_job, parse_compression, JobInfo, JobSource, LogKind, Store, JOB_SELECT};
 use crate::error::{EngineError, EngineResult};
 use crate::format::FormatProfile;
 use crate::source::SourceIdentity;
@@ -43,6 +43,9 @@ pub struct LogFilter {
     /// 요청 대상 정규식(RE2 문법, `(?i)`로 대소문자 무시). 분석 포맷의 패턴 검사에 쓴다.
     #[serde(default)]
     pub target_regex: Option<String>,
+    /// 로그 종류. `None`이면 접근·에러를 모두 본다.
+    #[serde(default)]
+    pub log_kind: Option<LogKind>,
     /// 룰 조건식(and/or/not 조합). 위의 단순 조건과 AND로 결합한다.
     #[serde(default)]
     pub expr: Option<FilterExpr>,
@@ -54,7 +57,7 @@ pub struct LogFilter {
     pub active_only: bool,
 }
 
-/// 조건식이 볼 수 있는 컬럼. 이름은 SQL에 직접 들어가므로 열거형으로만 만든다.
+/// 조건식이 볼 수 있는 필드. SQL 식이 문자열로 조립되므로 열거형으로만 만든다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CondField {
@@ -74,9 +77,16 @@ pub enum CondField {
     Referrer,
     /// User-Agent.
     UserAgent,
+    /// 확장 필드 JSON 원문(에러 로그의 레벨·메시지 등).
+    Extra,
+    /// 에러 로그 레벨(확장 필드에서 뽑음).
+    Level,
+    /// 에러 로그 메시지(확장 필드에서 뽑음).
+    Message,
 }
 
 impl CondField {
+    // SQL expression, not always a bare column: only enum variants reach here, so no injection.
     fn column(self) -> &'static str {
         match self {
             Self::Status => "status",
@@ -87,6 +97,26 @@ impl CondField {
             Self::Protocol => "protocol",
             Self::Referrer => "referrer",
             Self::UserAgent => "user_agent",
+            Self::Extra => "extra_json",
+            Self::Level => "json_extract_string(extra_json, '$.level')",
+            Self::Message => "json_extract_string(extra_json, '$.message')",
+        }
+    }
+
+    // Name shown in error messages; SQL expressions must not leak to the UI.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Status => "status",
+            Self::BytesSent => "bytes_sent",
+            Self::ClientIp => "client_ip",
+            Self::Method => "method",
+            Self::RequestTarget => "request_target",
+            Self::Protocol => "protocol",
+            Self::Referrer => "referrer",
+            Self::UserAgent => "user_agent",
+            Self::Extra => "extra",
+            Self::Level => "level",
+            Self::Message => "message",
         }
     }
 
@@ -208,6 +238,7 @@ fn expr_sql(
                 return Err(EngineError::Query("조건 값이 상한을 넘음".to_owned()));
             }
             let col = field.column();
+            let label = field.label();
             let numeric = field.is_numeric();
             match op {
                 CondOp::IsNull => out.push_str(&format!("{col} IS NULL")),
@@ -222,14 +253,14 @@ fn expr_sql(
                     };
                     if numeric {
                         let n: i64 = value.trim().parse().map_err(|_| {
-                            EngineError::Query(format!("{col} 비교 값은 정수여야 함"))
+                            EngineError::Query(format!("{label} 비교 값은 정수여야 함"))
                         })?;
                         out.push_str(&format!("{col} {sym} ?"));
                         params.push(Value::BigInt(n));
                     } else {
                         if !matches!(op, CondOp::Eq | CondOp::Ne) {
                             return Err(EngineError::Query(format!(
-                                "{col}에는 크기 비교를 쓸 수 없음"
+                                "{label}에는 크기 비교를 쓸 수 없음"
                             )));
                         }
                         out.push_str(&format!("{col} {sym} ?"));
@@ -243,7 +274,7 @@ fn expr_sql(
                 | CondOp::Regex => {
                     if numeric {
                         return Err(EngineError::Query(format!(
-                            "{col}에는 문자열 연산을 쓸 수 없음"
+                            "{label}에는 문자열 연산을 쓸 수 없음"
                         )));
                     }
                     match op {
@@ -343,6 +374,9 @@ pub struct LogRow {
     /// 북마크 여부.
     #[serde(default)]
     pub bookmarked: bool,
+    /// 확장 필드 JSON. 에러 로그의 레벨·메시지가 여기 들어간다.
+    #[serde(default)]
+    pub extra_json: Option<String>,
 }
 
 impl LogRow {
@@ -350,6 +384,7 @@ impl LogRow {
         48 + self.client_ip.as_ref().map_or(0, String::len)
             + self.method.as_ref().map_or(0, String::len)
             + self.request_target.as_ref().map_or(0, String::len)
+            + self.extra_json.as_ref().map_or(0, String::len)
     }
 }
 
@@ -466,6 +501,11 @@ pub(crate) fn filter_sql(filter: &LogFilter) -> EngineResult<SqlParts> {
         where_sql.push_str(" AND regexp_matches(request_target, ?)");
         params.push(Value::Text(v.clone()));
     }
+    if let Some(kind) = filter.log_kind {
+        // 종류는 작업에 기록한다. 값이 없는 예전 작업은 접근 로그로 본다.
+        where_sql.push_str(" AND job_id IN (SELECT job_id FROM import_jobs WHERE coalesce(log_kind, 'access') = ?)");
+        params.push(Value::Text(kind.as_str().to_owned()));
+    }
     if filter.bookmarked_only {
         where_sql.push_str(" AND EXISTS (SELECT 1 FROM bookmarks b WHERE b.source_id = logs.source_id AND b.line_number = logs.line_number)");
     }
@@ -482,7 +522,7 @@ fn filter_hash(filter: &LogFilter, sort: SortOrder) -> EngineResult<String> {
     Ok(crate::format::model::fnv1a_hex(&bytes))
 }
 
-const ROW_COLUMNS: &str = "source_id, line_number, epoch_us(timestamp_utc), client_ip, method, request_target, status, bytes_sent, EXISTS (SELECT 1 FROM bookmarks b WHERE b.source_id = logs.source_id AND b.line_number = logs.line_number)";
+const ROW_COLUMNS: &str = "source_id, line_number, epoch_us(timestamp_utc), client_ip, method, request_target, status, bytes_sent, EXISTS (SELECT 1 FROM bookmarks b WHERE b.source_id = logs.source_id AND b.line_number = logs.line_number), extra_json";
 
 fn read_row(r: &duckdb::Row<'_>) -> duckdb::Result<LogRow> {
     Ok(LogRow {
@@ -495,6 +535,7 @@ fn read_row(r: &duckdb::Row<'_>) -> duckdb::Result<LogRow> {
         status: r.get(6)?,
         bytes_sent: r.get(7)?,
         bookmarked: r.get(8)?,
+        extra_json: r.get(9)?,
     })
 }
 
@@ -1012,7 +1053,9 @@ mod tests {
                 [],
             )
             .unwrap();
-        let job = store.create_job(profile_id, &[1], None).unwrap();
+        let job = store
+            .create_job(profile_id, &[1], None, LogKind::Access)
+            .unwrap();
         let mk = |line: u64, ts: Option<i64>, status: u16| LogRecord {
             line_number: line,
             timestamp_utc: ts,
@@ -1100,6 +1143,268 @@ mod tests {
         only.filter.status = None;
         assert_eq!(store.count_matching(&only.filter).unwrap(), 1);
         let _ = &mut store;
+    }
+
+    /// 접근 로그 파일(source 1)과 에러 로그 파일(source 2)을 서로 다른 작업으로 넣는다.
+    fn kinded_store() -> (Store, i64, i64) {
+        let mut store = Store::open_in_memory(&StoreConfig::default()).unwrap();
+        let profile_id = store
+            .upsert_profile(&crate::format::presets::apache_combined())
+            .unwrap();
+        for (id, path) in [(1i64, "access.log"), (2, "error.log")] {
+            store
+                .conn()
+                .execute(
+                    "INSERT INTO sources (source_id, original_path, current_path, file_size, encoding, compression, head_hash, head_bytes) VALUES (?, ?, ?, 0, 'utf-8', 'none', '0', 0)",
+                    params![id, path, path],
+                )
+                .unwrap();
+        }
+        let access = store
+            .create_job(profile_id, &[1], None, LogKind::Access)
+            .unwrap();
+        let error = store
+            .create_job(profile_id, &[2], None, LogKind::Error)
+            .unwrap();
+        let access_rec = |line: u64| LogRecord {
+            line_number: line,
+            timestamp_utc: Some(100 * i64::try_from(line).unwrap_or(0)),
+            status: Some(200),
+            client_ip: Some("10.0.0.1".to_owned()),
+            request_target: Some(format!("/p{line}")),
+            ..LogRecord::default()
+        };
+        let error_rec = |line: u64, level: &str, message: &str| LogRecord {
+            line_number: line,
+            timestamp_utc: Some(100 * i64::try_from(line).unwrap_or(0)),
+            client_ip: Some("10.0.2.7".to_owned()),
+            extra: [
+                ("level".to_owned(), level.to_owned()),
+                ("message".to_owned(), message.to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+            ..LogRecord::default()
+        };
+        store
+            .commit_batch(&PendingBatch {
+                job_id: access.job_id,
+                source_id: 1,
+                batch_seq: 0,
+                records: vec![access_rec(1), access_rec(2), access_rec(3)],
+                ..PendingBatch::default()
+            })
+            .unwrap();
+        store
+            .commit_batch(&PendingBatch {
+                job_id: error.job_id,
+                source_id: 2,
+                batch_seq: 0,
+                records: vec![
+                    error_rec(1, "error", "open() \"/var/www/x\" failed (2: No such file)"),
+                    error_rec(2, "warn", "upstream sent too big header"),
+                ],
+                ..PendingBatch::default()
+            })
+            .unwrap();
+        (store, access.job_id, error.job_id)
+    }
+
+    #[test]
+    fn log_kind_filter_separates_access_and_error() {
+        let (store, access, error) = kinded_store();
+        let kinded = |kind: Option<LogKind>| LogFilter {
+            log_kind: kind,
+            ..LogFilter::default()
+        };
+        assert_eq!(store.count_matching(&kinded(None)).unwrap(), 5, "전체");
+        assert_eq!(
+            store
+                .count_matching(&kinded(Some(LogKind::Access)))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            store.count_matching(&kinded(Some(LogKind::Error))).unwrap(),
+            2
+        );
+        let page = store
+            .query_page(&PageRequest {
+                filter: kinded(Some(LogKind::Error)),
+                sort: SortOrder::TimeAsc,
+                page_size: 100,
+                cursor: None,
+            })
+            .unwrap();
+        assert!(
+            page.rows.iter().all(|r| r.source_id == 2),
+            "에러 작업의 파일만 나온다"
+        );
+        assert_eq!(store.job(access).unwrap().log_kind, LogKind::Access);
+        assert_eq!(store.job(error).unwrap().log_kind, LogKind::Error);
+    }
+
+    #[test]
+    fn page_rows_expose_extra_json() {
+        let (store, _, _) = kinded_store();
+        let page = store
+            .query_page(&PageRequest {
+                filter: LogFilter {
+                    log_kind: Some(LogKind::Error),
+                    ..LogFilter::default()
+                },
+                sort: SortOrder::TimeAsc,
+                page_size: 100,
+                cursor: None,
+            })
+            .unwrap();
+        let first = page.rows.first().expect("에러 행");
+        let extra = first.extra_json.as_deref().expect("확장 필드 JSON");
+        assert!(extra.contains("\"level\":\"error\""), "레벨 노출: {extra}");
+        assert!(extra.contains("open()"), "메시지 노출: {extra}");
+        let access = store
+            .query_page(&PageRequest {
+                filter: LogFilter {
+                    log_kind: Some(LogKind::Access),
+                    ..LogFilter::default()
+                },
+                sort: SortOrder::TimeAsc,
+                page_size: 100,
+                cursor: None,
+            })
+            .unwrap();
+        assert!(
+            access.rows.iter().all(|r| r.extra_json.is_none()),
+            "확장 필드가 없으면 NULL"
+        );
+    }
+
+    #[test]
+    fn extra_field_search_covers_message_and_client() {
+        let (store, _, _) = kinded_store();
+        let cond = |field, op, value: &str| FilterExpr::Cond {
+            field,
+            op,
+            value: value.to_owned(),
+        };
+        let search = |v: &str| LogFilter {
+            log_kind: Some(LogKind::Error),
+            // 화면의 에러 검색: 메시지(확장 필드) 또는 클라이언트 IP.
+            expr: Some(FilterExpr::Or {
+                items: vec![
+                    cond(CondField::Extra, CondOp::Icontains, v),
+                    cond(CondField::ClientIp, CondOp::Eq, v),
+                ],
+            }),
+            ..LogFilter::default()
+        };
+        assert_eq!(
+            store.count_matching(&search("OPEN()")).unwrap(),
+            1,
+            "대소문자 무시"
+        );
+        assert_eq!(store.count_matching(&search("upstream")).unwrap(), 1);
+        assert_eq!(
+            store.count_matching(&search("10.0.2.7")).unwrap(),
+            2,
+            "IP는 정확히 일치"
+        );
+        assert_eq!(store.count_matching(&search("없는문자열")).unwrap(), 0);
+        let too_long = LogFilter {
+            expr: Some(cond(
+                CondField::Extra,
+                CondOp::Icontains,
+                &"x".repeat(MAX_SEARCH_BYTES + 1),
+            )),
+            ..LogFilter::default()
+        };
+        assert!(
+            store.count_matching(&too_long).is_err(),
+            "검색 문자열 상한을 넘으면 오류"
+        );
+    }
+
+    #[test]
+    fn level_and_message_conditions_target_error_fields() {
+        let (store, _, _) = kinded_store();
+        let cond = |field, op, value: &str| FilterExpr::Cond {
+            field,
+            op,
+            value: value.to_owned(),
+        };
+        let with = |expr: FilterExpr| LogFilter {
+            expr: Some(expr),
+            ..LogFilter::default()
+        };
+        // 전체 5행 중 에러 로그 2행만 레벨을 가진다.
+        assert_eq!(
+            store
+                .count_matching(&with(cond(CondField::Level, CondOp::Eq, "error")))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .count_matching(&with(cond(CondField::Level, CondOp::Eq, "warn")))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .count_matching(&with(cond(CondField::Level, CondOp::IsNull, "")))
+                .unwrap(),
+            3,
+            "접근 로그 행은 확장 필드가 NULL이라 레벨이 없다"
+        );
+        assert_eq!(
+            store
+                .count_matching(&with(cond(
+                    CondField::Message,
+                    CondOp::Icontains,
+                    "TOO BIG HEADER"
+                )))
+                .unwrap(),
+            1,
+            "메시지 부분 문자열은 대소문자를 무시한다"
+        );
+        assert_eq!(
+            store
+                .count_matching(&with(cond(
+                    CondField::Message,
+                    CondOp::StartsWith,
+                    "open()"
+                )))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .count_matching(&with(cond(
+                    CondField::Message,
+                    CondOp::Regex,
+                    "failed \\(\\d+:"
+                )))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .count_matching(&with(cond(
+                    CondField::Message,
+                    CondOp::Ne,
+                    "upstream sent too big header"
+                )))
+                .unwrap(),
+            1,
+            "값이 없는 접근 로그 행은 잡히지 않는다"
+        );
+        // 크기 비교는 문자열 컬럼에 쓸 수 없고, 오류 메시지에는 SQL 식이 아니라 필드 이름이 나온다.
+        let err = store
+            .count_matching(&with(cond(CondField::Level, CondOp::Gt, "error")))
+            .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("level"), "필드 이름을 알려야 함: {text}");
+        assert!(!text.contains("json_extract"), "SQL 식 노출 금지: {text}");
     }
 
     #[test]

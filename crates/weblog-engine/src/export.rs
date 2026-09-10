@@ -271,7 +271,9 @@ mod tests {
         let profile_id = store
             .upsert_profile(&crate::format::presets::apache_combined())
             .unwrap();
-        let job = store.create_job(profile_id, &[1], None).unwrap();
+        let job = store
+            .create_job(profile_id, &[1], None, crate::store::LogKind::Access)
+            .unwrap();
         let records = (1..=n)
             .map(|i| LogRecord {
                 line_number: i,

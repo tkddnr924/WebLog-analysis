@@ -1,84 +1,42 @@
-import { useCallback, useEffect, useState } from "react";
+// 에러 로그 조회. 접근 로그와 컬럼이 다르고, 룰 사이드바의 에러 룰 조건을 그대로 받는다.
+import { useEffect, useState } from "react";
 import { useAppState } from "../state";
-import { formatCount, formatTime, parseTimeInput, statusClass } from "../lib/format";
-import { emptyFilter, type FilterExpr, type LogFilter, type SortOrder } from "../types";
+import { formatCount, formatTime } from "../lib/format";
+import { errorFields, levelClass } from "../lib/errorRows";
+import { emptyFilter, type LogFilter, type SortOrder } from "../types";
+import { composeErrorFilter, emptyErrorForm, type ErrorForm } from "./errorFilter";
 import { DetailPanel } from "./DetailPanel";
 import { ROW_HEIGHT, useLogRows } from "./useLogRows";
 
-interface Form {
-  from: string;
-  to: string;
-  q: string;
-}
-
-const emptyForm: Form = { from: "", to: "", q: "" };
-
-/** 빠른 검색: 경로·IP·리퍼러·브라우저 중 하나라도 검색어를 포함(대소문자 무시). IP는 정확히 일치도 본다. */
-export function quickSearchExpr(q: string): FilterExpr | null {
-  const v = q.trim();
-  if (v === "") return null;
-  return {
-    kind: "or",
-    items: [
-      { kind: "cond", field: "request_target", op: "icontains", value: v },
-      { kind: "cond", field: "client_ip", op: "eq", value: v },
-      { kind: "cond", field: "referrer", op: "icontains", value: v },
-      { kind: "cond", field: "user_agent", op: "icontains", value: v },
-    ],
-  };
-}
-
-/** 룰 조건 위에 화면의 기간·검색을 얹는다. 잘못된 시각이면 오류 문자열. */
-export function composeFilter(base: LogFilter, f: Form): LogFilter | string {
-  const from = parseTimeInput(f.from);
-  const to = parseTimeInput(f.to);
-  if (from === undefined || to === undefined) return "시각은 YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM 형식(한국 시간)으로 입력하세요.";
-  const quick = quickSearchExpr(f.q);
-  const expr: FilterExpr | null = quick ? (base.expr ? { kind: "and", items: [base.expr, quick] } : quick) : base.expr;
-  return { ...base, time_from_micros: from, time_to_micros: to, expr };
-}
-
-export function QueryPanel() {
-  const { project, setNotice, ruleRequest, setCurrentFilter } = useAppState();
-  const [form, setForm] = useState<Form>(emptyForm);
+export function ErrorPanel() {
+  const { project, setNotice, ruleRequest } = useAppState();
+  const [form, setForm] = useState<ErrorForm>(emptyErrorForm);
   const [sort, setSort] = useState<SortOrder>("time_asc");
   const { rows, cache, loading, applied, selected, setSelected, scrollRef, virtualizer, items, applyFilter, toggleBookmark } = useLogRows();
 
-  // 사용자 룰로 저장할 수 있게 마지막 조건을 전역에 남긴다.
-  const applyAndRemember = useCallback(
-    (f: LogFilter, s: SortOrder) => {
-      setCurrentFilter(f);
-      applyFilter(f, s);
-    },
-    [applyFilter, setCurrentFilter],
-  );
-
-  // 접근 룰의 조건만 쓴다. 에러 룰이 선택된 상태의 조건(레벨·메시지)은 접근 로그와 상관이 없으므로 버린다.
-  const accessRule = ruleRequest?.filter.log_kind === "access" ? ruleRequest.filter : null;
-  const base: LogFilter = { ...(accessRule ?? { ...emptyFilter(), active_only: true }), log_kind: "access" };
+  // 다른 종류(접근 로그)의 룰 조건이 남아 있으면 쓰지 않는다.
+  const base: LogFilter = { ...(ruleRequest?.filter.log_kind === "error" ? ruleRequest.filter : { ...emptyFilter(), active_only: true }), log_kind: "error" };
 
   const apply = () => {
-    const f = composeFilter(base, form);
+    const f = composeErrorFilter(base, form);
     if (typeof f === "string") {
       setNotice(f);
       return;
     }
-    applyAndRemember(f, sort);
+    applyFilter(f, sort);
   };
 
-  // 사이드바에서 룰을 고르면 화면의 기간·검색은 유지한 채 바로 조회한다.
+  // 사이드바에서 에러 룰을 고르면 화면의 기간·검색은 유지한 채 바로 조회한다.
   useEffect(() => {
-    if (!accessRule || !project) return;
-    const f = composeFilter({ ...accessRule, log_kind: "access" }, form);
-    if (typeof f !== "string") applyAndRemember(f, sort);
+    if (project) apply();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ruleRequest?.nonce, project]);
 
   if (!project) {
     return (
       <section>
-        <h1>조회</h1>
-        <p className="muted">프로젝트를 열면 저장된 로그를 조회할 수 있습니다.</p>
+        <h1>에러 로그</h1>
+        <p className="muted">프로젝트를 열면 저장된 에러 로그를 조회할 수 있습니다.</p>
       </section>
     );
   }
@@ -101,8 +59,8 @@ export function QueryPanel() {
           <input value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} placeholder="2026-09-02T00:00" spellCheck={false} />
         </label>
         <label className="f f-search">
-          <span>검색 (경로 · IP · 리퍼러 · 브라우저)</span>
-          <input value={form.q} onChange={(e) => setForm({ ...form, q: e.target.value })} placeholder="예: /admin, 10.0.0.1, python" spellCheck={false} />
+          <span>검색 (메시지 · IP)</span>
+          <input value={form.q} onChange={(e) => setForm({ ...form, q: e.target.value })} placeholder="예: No such file, 10.0.0.1" spellCheck={false} />
         </label>
         <label className="f f-sort">
           <span>정렬</span>
@@ -124,30 +82,29 @@ export function QueryPanel() {
             {cache.exhausted ? " · 끝" : " · 스크롤하면 더 불러옴"}
           </>
         ) : (
-          <span className="muted">조건을 정하고 조회를 누르세요. 시간 필터는 시간이 미확정인 행을 제외합니다.</span>
+          <span className="muted">왼쪽에서 룰을 고르거나 조건을 정하고 조회를 누르세요. 검색어는 메시지·클라이언트 IP를 함께 봅니다.</span>
         )}
       </div>
 
       <div className="query-body">
         <div className="table-wrap virtual" ref={scrollRef}>
-          <div className="vhead">
+          <div className="vhead verr">
             <span className="star-col" aria-label="북마크" />
             <span>시간(KST)</span>
-            <span>IP</span>
-            <span>메서드</span>
-            <span>대상</span>
-            <span>상태</span>
-            <span className="num">바이트</span>
+            <span>레벨</span>
+            <span>클라이언트</span>
+            <span>메시지</span>
             <span>출처</span>
           </div>
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {items.map((vi) => {
               const r = rows[vi.index];
+              const f = errorFields(r);
               const isSel = selected !== null && selected.source_id === r.source_id && selected.line_number === r.line_number;
               return (
                 <div
                   key={vi.key}
-                  className={`vrow ${isSel ? "sel" : ""} ${r.bookmarked ? "bm" : ""}`}
+                  className={`vrow verr ${isSel ? "sel" : ""} ${r.bookmarked ? "bm" : ""}`}
                   style={{ transform: `translateY(${vi.start}px)`, height: ROW_HEIGHT }}
                   onClick={() => setSelected(r)}
                   onKeyDown={(e) => {
@@ -174,15 +131,9 @@ export function QueryPanel() {
                     {r.bookmarked ? "★" : "☆"}
                   </button>
                   <span className="mono">{formatTime(r.timestamp_utc)}</span>
-                  <span className="mono">{r.client_ip ?? "–"}</span>
-                  <span>{r.method ?? "–"}</span>
-                  <span className="mono" title={r.request_target ?? ""}>
-                    {r.request_target ?? "–"}
-                  </span>
-                  <span>
-                    <span className={`chip ${statusClass(r.status)}`}>{r.status ?? "–"}</span>
-                  </span>
-                  <span className="num">{r.bytes_sent ?? "–"}</span>
+                  <span>{f.level === "" ? "–" : <span className={`chip ${levelClass(f.level)}`}>{f.level}</span>}</span>
+                  <span className="mono">{f.client === "" ? "–" : f.client}</span>
+                  <span title={f.message}>{f.message === "" ? "–" : f.message}</span>
                   <span className="mono muted">
                     #{r.source_id}:{r.line_number}
                   </span>
@@ -190,7 +141,7 @@ export function QueryPanel() {
               );
             })}
           </div>
-          {rows.length === 0 && applied && !loading && <div className="empty">조건에 맞는 로그가 없습니다.</div>}
+          {rows.length === 0 && applied && !loading && <div className="empty">조건에 맞는 에러 로그가 없습니다.</div>}
           {loading && <div className="loading">불러오는 중…</div>}
         </div>
       </div>

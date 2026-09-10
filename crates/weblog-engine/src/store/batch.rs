@@ -254,7 +254,9 @@ mod tests {
         let profile_id = store
             .upsert_profile(&crate::format::presets::apache_combined())
             .unwrap();
-        let job = store.create_job(profile_id, &[1], None).unwrap();
+        let job = store
+            .create_job(profile_id, &[1], None, crate::store::LogKind::Access)
+            .unwrap();
         (store, job.job_id)
     }
 

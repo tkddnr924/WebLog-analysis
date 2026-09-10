@@ -7,12 +7,13 @@
 |---|---|
 | sources | source_id, 원래 경로, 현재 연결 경로, 파일 크기/수정 시각, 인코딩, 압축 방식, 선두 64KiB SHA-256, 전체 SHA-256(선택) |
 | parser_profiles | profile_id, version, 정의 스냅샷, 정의 해시 |
-| import_jobs | job_id, 결과 버전, 작업 상태, 프로필, 확정 건수, 시작/종료 시간, active(조회 대상 여부), replaces_job_id(재파싱 대체 대상) |
+| import_jobs | job_id, 결과 버전, 작업 상태, 프로필, 확정 건수, 시작/종료 시간, active(조회 대상 여부), replaces_job_id(재파싱 대체 대상), log_kind(access/error) |
 | import_job_sources | job_id, source_id, 처리 순서, 파일별 상태(pending/running/done/cancelled/failed) |
 | import_batches | job_id, source_id, batch_id, 처리 시작/종료 위치, 다음 읽기 위치, 당시 헤더 상태, 성공/실패/제외 건수 |
 | logs | 고유 키, job_id, source_id, batch_id, line_number, timestamp_utc, client_ip, method, request_target, protocol, status, bytes_sent, referrer, user_agent, 확장 필드 |
 | parse_errors | job_id, source_id, batch_id, line_number, 오류 코드, 입력 문자열을 포함하지 않는 설명 |
 | saved_views | 컬럼·필터·정렬 프리셋 |
+| bookmarks | source_id, line_number, 생성 시각. 작업·로그 종류와 무관하게 파일·줄로만 식별한다 |
 
 원문 테이블/raw_line/원문 아카이브는 만들지 않는다. 파일 경로는 sources에 한 번 저장하고 행은 source_id로 참조한다. 포맷 버전은 작업/배치에서 참조하며 파일 중간의 헤더 변경도 추적한다.
 
@@ -46,4 +47,8 @@
 - UI는 조건 객체를 보내고 Rust가 바인딩 SQL을 생성한다. 컬럼·정렬은 허용 목록으로 검증한다.
 - 기본 페이지 커서는 필터/정렬 해시, 결과 버전, 확정 배치 경계, timestamp와 고유 키를 포함한다.
 - NULL 시간은 별도 정렬 구간으로 명시한다. 이후 확정된 배치가 기존 페이지에 끼어들지 않도록 조회 범위를 고정한다.
+- 로그 종류는 작업에 기록한다(`log_kind`). 조회는 `LogFilter.log_kind`로 접근 로그와 에러 로그를 나누며, 값이 없는 예전 작업은 접근 로그로 본다(스키마 v4에서 프로필 이름이 `error_log*`면 error로 채운다).
+- 에러 로그의 레벨·메시지 등 표준 컬럼이 없는 필드는 `logs.extra_json`에 남는다. 목록 조회도 이 컬럼을 함께 돌려주고, 조건식은 `level`·`message` 컬럼(`CondField::Level`/`Message`, `json_extract_string(extra_json, '$.level'|'$.message')`)으로 값 하나씩 다루며 `extra`(원문 JSON 문자열)도 그대로 쓸 수 있다. 세 컬럼 모두 문자열 연산만 허용한다.
+- 통계는 `filter.log_kind`로 갈라진다. 에러 로그면 상태코드·메서드·요청 대상 집계를 건너뛰고 `levels`(레벨별 건수, NULL 포함)와 `top_messages`(상위 메시지, top_n)를 채운다. 접근 로그면 그 반대이며 총계·상위 IP·시간축은 두 경우 모두 채운다.
+- 북마크는 (source_id, line_number) 하나뿐이라 접근 로그 화면과 에러 로그 화면이 같은 표를 공유한다. 각 화면은 자기 종류의 행만 보여준다.
 - 내보내기에도 같은 범위 고정과 스트리밍을 적용한다.

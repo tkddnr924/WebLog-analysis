@@ -14,7 +14,7 @@ use crate::format::FormatProfile;
 use crate::parse::{LineOutcome, LineParser, ParseErrorCode};
 use crate::source::{LineContent, LineReader, SourceIdentity, StatSnapshot};
 use crate::store::batch::BatchError;
-use crate::store::{CommitOutcome, JobStatus, LogQuery, PendingBatch, Store};
+use crate::store::{CommitOutcome, JobStatus, LogKind, LogQuery, PendingBatch, Store};
 
 /// 가져오기 설정. 기본값은 선행 실험의 출발점이며 확정 성능 목표가 아니다.
 #[derive(Debug, Clone)]
@@ -52,6 +52,8 @@ pub struct ImportRequest {
     pub paths: Vec<PathBuf>,
     /// 재파싱이면 대체할 이전 작업. 새 결과는 비활성으로 시작하며 완료 후 명시적으로 전환한다.
     pub replaces_job_id: Option<i64>,
+    /// 로그 종류(접근·에러). 조회 화면이 이 값으로 결과를 나눈다.
+    pub log_kind: LogKind,
 }
 
 /// 파일별 결과(이번 실행분).
@@ -159,7 +161,7 @@ pub fn run_import(
         });
     }
     let source_ids: Vec<i64> = tasks.iter().map(|t| t.source_id).collect();
-    let job = store.create_job(profile_id, &source_ids, req.replaces_job_id)?;
+    let job = store.create_job(profile_id, &source_ids, req.replaces_job_id, req.log_kind)?;
     // Report the job id without waiting for the first batch commit.
     on_progress(&Progress {
         job_id: job.job_id,
@@ -660,6 +662,7 @@ mod tests {
             profile: presets::apache_combined(),
             paths,
             replaces_job_id: None,
+            log_kind: LogKind::Access,
         }
     }
 

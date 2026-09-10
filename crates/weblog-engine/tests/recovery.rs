@@ -46,6 +46,7 @@ fn request(paths: Vec<PathBuf>) -> ImportRequest {
         profile: presets::apache_combined(),
         paths,
         replaces_job_id: None,
+        log_kind: weblog_engine::store::LogKind::Access,
     }
 }
 
@@ -336,6 +337,7 @@ fn w3c_header_change_before_crash_is_restored_on_resume() {
         profile: presets::iis_w3c(),
         paths: vec![log.clone()],
         replaces_job_id: None,
+        log_kind: weblog_engine::store::LogKind::Access,
     };
     // 배치 6줄: 헤더1 + 4데이터 + 헤더2 → 첫 배치 끝에 두 번째 헤더 상태가 저장된다. 그 직후 죽는다.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

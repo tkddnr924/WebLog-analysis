@@ -39,6 +39,7 @@ const row = (line: number): LogRow => ({
   status: 200,
   bytes_sent: 1,
   bookmarked: false,
+  extra_json: null,
 });
 
 const page = (from: number, n: number, more: boolean): LogPage => ({

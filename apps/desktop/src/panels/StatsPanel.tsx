@@ -7,8 +7,8 @@ import { emptyFilter, type StatsResult } from "../types";
 /** 시간축 막대 그래프. 단일 계열이라 색 하나만 쓰고, 값은 호버 툴팁과 표로 읽는다. */
 type IpSort = "count" | "first" | "last";
 
-/** IP별 최초·마지막 탐지와 접근 횟수. 머리글을 눌러 정렬한다. */
-function IpTable({ rows }: { rows: StatsResult["ip_rows"] }) {
+/** IP별 최초·마지막 탐지와 접근 횟수. 머리글을 눌러 정렬한다. 에러 통계도 같은 표를 쓴다. */
+export function IpTable({ rows }: { rows: StatsResult["ip_rows"] }) {
   const [sort, setSort] = useState<{ key: IpSort; desc: boolean }>({ key: "count", desc: true });
   const sorted = useMemo(() => {
     const v = (r: StatsResult["ip_rows"][number]) => (sort.key === "count" ? r.count : sort.key === "first" ? (r.first_seen ?? Number.MAX_SAFE_INTEGER) : (r.last_seen ?? -1));
@@ -60,7 +60,7 @@ function IpTable({ rows }: { rows: StatsResult["ip_rows"] }) {
   );
 }
 
-function Bars({ title, rows, unit }: { title: string; rows: [string, number][]; unit: string }) {
+export function Bars({ title, rows, unit }: { title: string; rows: [string, number][]; unit: string }) {
   const max = Math.max(...rows.map((r) => r[1]), 1);
   return (
     <div className="chart">
@@ -109,8 +109,14 @@ export function StatsPanel() {
     setLoading(true);
     try {
       const result = await api.computeStats({
-        // 사이드바 룰의 조건(상태·메서드·IP·경로) 위에 이 화면의 시간·작업·활성 조건을 얹는다.
-        filter: { ...(ruleRequest?.filter ?? emptyFilter()), time_from_micros: f, time_to_micros: t, active_only: activeOnly },
+        // 사이드바 접근 룰의 조건(상태·메서드·IP·경로) 위에 이 화면의 시간·작업·활성 조건을 얹는다. 집계는 접근 로그만 본다.
+        filter: {
+          ...(ruleRequest?.filter.log_kind === "access" ? ruleRequest.filter : emptyFilter()),
+          time_from_micros: f,
+          time_to_micros: t,
+          active_only: activeOnly,
+          log_kind: "access",
+        },
         top_n: topN,
         bucket: "auto",
         tz_offset_seconds: DISPLAY_OFFSET_SECONDS,

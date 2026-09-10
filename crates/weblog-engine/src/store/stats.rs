@@ -5,6 +5,7 @@ use duckdb::types::Value;
 use serde::{Deserialize, Serialize};
 
 use super::query::{filter_sql, LogFilter, LogQuery};
+use super::LogKind;
 use crate::error::{EngineError, EngineResult};
 
 /// 상위 N 상한.
@@ -62,6 +63,10 @@ pub struct StatsResult {
     pub status: Vec<(Option<i32>, i64)>,
     /// 메서드별 건수.
     pub methods: Vec<(Option<String>, i64)>,
+    /// 에러 로그 레벨별 건수(많은 순). 접근 로그 조건이면 빈 배열.
+    pub levels: Vec<(Option<String>, i64)>,
+    /// 에러 로그 상위 메시지(많은 순, top_n개). 접근 로그 조건이면 빈 배열.
+    pub top_messages: Vec<(String, i64)>,
     /// 상위 클라이언트 IP.
     pub top_ips: Vec<(String, i64)>,
     /// 상위 클라이언트 IP의 최초·마지막 탐지 시각과 접근 횟수(접근 횟수 내림차순, top_n개).
@@ -138,19 +143,46 @@ pub fn compute_stats(q: &impl LogQuery, req: &StatsRequest) -> EngineResult<Stat
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     )?;
 
-    let status = conn
-        .prepare(&format!(
-            "SELECT status, COUNT(*) FROM logs WHERE {where_sql} GROUP BY status ORDER BY status"
-        ))?
-        .query_map(params(vec![]), |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<Result<Vec<_>, _>>()?;
-    let methods = conn
-        .prepare(&format!(
-            "SELECT method, COUNT(*) AS n FROM logs WHERE {where_sql} GROUP BY method ORDER BY n DESC LIMIT 50"
-        ))?
-        .query_map(params(vec![]), |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<Result<Vec<_>, _>>()?;
     let top_n = Value::BigInt(i64::from(req.top_n));
+    // Error logs have no status/method/target; they aggregate level and message instead.
+    let mut status = Vec::new();
+    let mut methods = Vec::new();
+    let mut top_targets = Vec::new();
+    let mut levels = Vec::new();
+    let mut top_messages = Vec::new();
+    if matches!(req.filter.log_kind, Some(LogKind::Error)) {
+        levels = conn
+            .prepare(&format!(
+                "SELECT json_extract_string(extra_json, '$.level') AS lvl, COUNT(*) AS n FROM logs WHERE {where_sql} GROUP BY lvl ORDER BY n DESC, lvl LIMIT 50"
+            ))?
+            .query_map(params(vec![]), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        top_messages = conn
+            .prepare(&format!(
+                "SELECT json_extract_string(extra_json, '$.message') AS msg, COUNT(*) AS n FROM logs WHERE {where_sql} AND json_extract_string(extra_json, '$.message') IS NOT NULL GROUP BY msg ORDER BY n DESC, msg LIMIT ?"
+            ))?
+            .query_map(params(vec![top_n.clone()]), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+    } else {
+        status = conn
+            .prepare(&format!(
+                "SELECT status, COUNT(*) FROM logs WHERE {where_sql} GROUP BY status ORDER BY status"
+            ))?
+            .query_map(params(vec![]), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        methods = conn
+            .prepare(&format!(
+                "SELECT method, COUNT(*) AS n FROM logs WHERE {where_sql} GROUP BY method ORDER BY n DESC LIMIT 50"
+            ))?
+            .query_map(params(vec![]), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        top_targets = conn
+            .prepare(&format!(
+                "SELECT request_target, COUNT(*) AS n FROM logs WHERE {where_sql} AND request_target IS NOT NULL GROUP BY request_target ORDER BY n DESC, request_target LIMIT ?"
+            ))?
+            .query_map(params(vec![top_n.clone()]), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
     let top_ips = conn
         .prepare(&format!(
             "SELECT client_ip, COUNT(*) AS n FROM logs WHERE {where_sql} AND client_ip IS NOT NULL GROUP BY client_ip ORDER BY n DESC, client_ip LIMIT ?"
@@ -169,12 +201,6 @@ pub fn compute_stats(q: &impl LogQuery, req: &StatsRequest) -> EngineResult<Stat
                 count: r.get(3)?,
             })
         })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let top_targets = conn
-        .prepare(&format!(
-            "SELECT request_target, COUNT(*) AS n FROM logs WHERE {where_sql} AND request_target IS NOT NULL GROUP BY request_target ORDER BY n DESC, request_target LIMIT ?"
-        ))?
-        .query_map(params(vec![top_n]), |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
     let time_range = match (min_ts, max_ts) {
@@ -218,6 +244,8 @@ pub fn compute_stats(q: &impl LogQuery, req: &StatsRequest) -> EngineResult<Stat
         null_time_rows,
         status,
         methods,
+        levels,
+        top_messages,
         top_ips,
         ip_rows,
         top_targets,
@@ -247,7 +275,9 @@ mod tests {
                 [],
             )
             .unwrap();
-        let job = store.create_job(profile_id, &[1], None).unwrap();
+        let job = store
+            .create_job(profile_id, &[1], None, crate::store::LogKind::Access)
+            .unwrap();
         let mut records = Vec::new();
         for i in 0..100u64 {
             records.push(LogRecord {
@@ -378,5 +408,138 @@ mod tests {
         assert_eq!(choose_bucket(60 * 1_000_000), 60);
         assert_eq!(choose_bucket(30 * 86_400 * 1_000_000), 6 * 3600);
         assert_eq!(choose_bucket(3 * 365 * 86_400 * 1_000_000), 7 * 86_400);
+    }
+
+    /// 접근 로그 작업(source 1)과 에러 로그 작업(source 2)을 한 저장소에 넣는다.
+    fn kinded_seeded() -> Store {
+        let mut store = Store::open_in_memory(&StoreConfig::default()).unwrap();
+        let profile_id = store
+            .upsert_profile(&crate::format::presets::apache_combined())
+            .unwrap();
+        for (id, path) in [(1i64, "access.log"), (2, "error.log")] {
+            store
+                .conn_for_tests()
+                .execute(
+                    "INSERT INTO sources (source_id, original_path, current_path, file_size, encoding, compression, head_hash, head_bytes) VALUES (?, ?, ?, 0, 'utf-8', 'none', '0', 0)",
+                    duckdb::params![id, path, path],
+                )
+                .unwrap();
+        }
+        let access = store
+            .create_job(profile_id, &[1], None, crate::store::LogKind::Access)
+            .unwrap();
+        let error = store
+            .create_job(profile_id, &[2], None, crate::store::LogKind::Error)
+            .unwrap();
+        let access_rec = |line: u64| LogRecord {
+            line_number: line,
+            timestamp_utc: Some(i64::try_from(line).unwrap() * 60_000_000),
+            client_ip: Some("10.0.0.1".to_owned()),
+            method: Some(if line == 1 {
+                "POST".into()
+            } else {
+                "GET".into()
+            }),
+            request_target: Some("/p".to_owned()),
+            status: Some(if line == 1 { 500 } else { 200 }),
+            ..LogRecord::default()
+        };
+        // 레벨 error 3건·warn 2건·레벨 없음 1건, 메시지는 2건·2건·1건·1건.
+        let error_rec = |line: u64, level: Option<&str>, message: &str| LogRecord {
+            line_number: line,
+            timestamp_utc: Some(i64::try_from(line).unwrap() * 60_000_000),
+            client_ip: Some("10.0.2.7".to_owned()),
+            extra: level
+                .map(|l| ("level".to_owned(), l.to_owned()))
+                .into_iter()
+                .chain(std::iter::once(("message".to_owned(), message.to_owned())))
+                .collect(),
+            ..LogRecord::default()
+        };
+        store
+            .commit_batch(&PendingBatch {
+                job_id: access.job_id,
+                source_id: 1,
+                batch_seq: 0,
+                records: vec![access_rec(1), access_rec(2), access_rec(3), access_rec(4)],
+                ..PendingBatch::default()
+            })
+            .unwrap();
+        store
+            .commit_batch(&PendingBatch {
+                job_id: error.job_id,
+                source_id: 2,
+                batch_seq: 0,
+                records: vec![
+                    error_rec(1, Some("error"), "open() failed"),
+                    error_rec(2, Some("error"), "open() failed"),
+                    error_rec(3, Some("error"), "upstream timeout"),
+                    error_rec(4, Some("warn"), "upstream timeout"),
+                    error_rec(5, Some("warn"), "cache miss"),
+                    error_rec(6, None, "no level here"),
+                ],
+                ..PendingBatch::default()
+            })
+            .unwrap();
+        store
+    }
+
+    fn kinded_request(kind: crate::store::LogKind, top_n: u32) -> StatsRequest {
+        StatsRequest {
+            filter: LogFilter {
+                log_kind: Some(kind),
+                ..LogFilter::default()
+            },
+            top_n,
+            bucket: TimeBucket::Minute,
+            tz_offset_seconds: 0,
+        }
+    }
+
+    #[test]
+    fn error_stats_group_levels_and_messages() {
+        let store = kinded_seeded();
+        let r = compute_stats(&store, &kinded_request(crate::store::LogKind::Error, 2)).unwrap();
+        assert_eq!(r.total, 6);
+        assert_eq!(
+            r.levels,
+            vec![
+                (Some("error".to_owned()), 3),
+                (Some("warn".to_owned()), 2),
+                (None, 1),
+            ],
+            "레벨은 많은 순이고 NULL도 한 항목"
+        );
+        assert_eq!(
+            r.top_messages,
+            vec![
+                ("open() failed".to_owned(), 2),
+                ("upstream timeout".to_owned(), 2)
+            ],
+            "메시지는 top_n 상한을 지킨다"
+        );
+        assert!(r.status.is_empty(), "에러 로그에는 상태코드가 없다");
+        assert!(r.methods.is_empty(), "에러 로그에는 메서드가 없다");
+        assert!(r.top_targets.is_empty(), "에러 로그에는 요청 대상이 없다");
+        assert_eq!(r.null_time_rows, 0);
+        assert_eq!(r.top_ips, vec![("10.0.2.7".to_owned(), 6)]);
+        assert_eq!(r.bucket_seconds, 60);
+        assert_eq!(r.timeline.len(), 6);
+        assert_eq!(r.time_range, Some((60_000_000, 6 * 60_000_000)));
+    }
+
+    #[test]
+    fn access_stats_leave_error_aggregates_empty() {
+        let store = kinded_seeded();
+        let r = compute_stats(&store, &kinded_request(crate::store::LogKind::Access, 5)).unwrap();
+        assert_eq!(r.total, 4);
+        assert_eq!(r.status, vec![(Some(200), 3), (Some(500), 1)]);
+        assert_eq!(r.methods[0], (Some("GET".to_owned()), 3));
+        assert_eq!(r.top_targets, vec![("/p".to_owned(), 4)]);
+        assert!(r.levels.is_empty(), "접근 로그 조건이면 레벨 집계는 없다");
+        assert!(
+            r.top_messages.is_empty(),
+            "접근 로그 조건이면 메시지 집계는 없다"
+        );
     }
 }

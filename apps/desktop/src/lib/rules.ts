@@ -1,5 +1,5 @@
 // 분석 룰: YARA풍 텍스트가 원본이다. 기본 룰은 내장 원문, 사용자 룰은 저장된 뷰(rule_source)로 둔다.
-import { emptyFilter, type LogFilter, type SavedView } from "../types";
+import { emptyFilter, type CondField, type LogFilter, type LogKind, type SavedView } from "../types";
 import { describeExpr, parseRule } from "./yara";
 import type { FilterExpr } from "../types";
 
@@ -189,8 +189,143 @@ export const BUILTIN_SOURCES: string[] = [
 }`,
 ];
 
-function compileBuiltin(src: string): Rule {
-  const r = parseRule(src);
+/**
+ * 에러 로그 기본 룰 원문. 문구는 nginx·apache 에러 로그에 실제로 찍히는 문장을 그대로 쓴다.
+ * `$id`만 쓴 서명은 메시지에 적용된다(접근 룰은 경로).
+ */
+export const BUILTIN_ERROR_SOURCES: string[] = [
+  `rule all_errors
+{
+    meta:
+        name = "전체 에러"
+        description = "조건 없이 에러 로그 전체를 봅니다."
+    condition:
+        true
+}`,
+  `rule severe_levels
+{
+    meta:
+        name = "심각(crit·alert·emerg)"
+        description = "레벨이 crit, alert, emerg인 줄. apache는 core:crit 처럼 모듈 이름이 앞에 붙어도 잡습니다."
+    strings:
+        $sev = /crit|alert|emerg/ nocase
+    condition:
+        level matches $sev
+}`,
+  `rule error_level
+{
+    meta:
+        name = "오류(error)"
+        description = "레벨이 error인 줄. nginx [error], apache [core:error] 둘 다 잡습니다."
+    strings:
+        $lv = /error/ nocase
+    condition:
+        level matches $lv
+}`,
+  `rule warn_level
+{
+    meta:
+        name = "경고(warn)"
+        description = "레벨이 warn인 줄. nginx [warn], apache [php:warn]."
+    strings:
+        $lv = /warn/ nocase
+    condition:
+        level matches $lv
+}`,
+  `rule file_missing
+{
+    meta:
+        name = "파일 없음"
+        description = "nginx open()/stat() failed (2: No such file or directory), apache AH00035 File does not exist."
+    strings:
+        $nginx  = "No such file or directory" nocase
+        $stat   = "stat() failed" nocase
+        $apache = "File does not exist" nocase
+    condition:
+        any of them
+}`,
+  `rule permission_denied
+{
+    meta:
+        name = "권한 거부"
+        description = "nginx failed (13: Permission denied), apache AH01630 client denied by server configuration."
+    strings:
+        $perm   = "Permission denied" nocase
+        $denied = "denied by server configuration" nocase
+    condition:
+        any of them
+}`,
+  `rule upstream_failed
+{
+    meta:
+        name = "업스트림 연결 실패"
+        description = "connect() failed (111: Connection refused), upstream timed out, no live upstreams, upstream prematurely closed connection, upstream sent too big header."
+    strings:
+        $refused = "Connection refused" nocase
+        $timeout = "upstream timed out" nocase
+        $nolive  = "no live upstreams" nocase
+        $closed  = "upstream prematurely closed connection" nocase
+        $reset   = "Connection reset by peer" nocase
+        $hdr     = "upstream sent too big header" nocase
+    condition:
+        any of them
+}`,
+  `rule body_too_large
+{
+    meta:
+        name = "요청 본문 초과"
+        description = "client intended to send too large body. nginx client_max_body_size, apache Request Entity Too Large."
+    strings:
+        $big = "client intended to send too large body" nocase
+        $ent = "Request Entity Too Large" nocase
+    condition:
+        any of them
+}`,
+  `rule ssl_handshake
+{
+    meta:
+        name = "SSL 핸드쉐이크 오류"
+        description = "SSL_do_handshake() failed, SSL routines, SSL handshake error, SSL_read() failed."
+    strings:
+        $hs   = "SSL_do_handshake" nocase
+        $rt   = "SSL routines" nocase
+        $err  = "SSL handshake error" nocase
+        $read = "SSL_read() failed" nocase
+    condition:
+        any of them
+}`,
+  `rule php_fastcgi
+{
+    meta:
+        name = "PHP·FastCGI 실패"
+        description = "FastCGI sent in stderr, PHP message, PHP Fatal error."
+    strings:
+        $fcgi  = "FastCGI sent in stderr" nocase
+        $php   = "PHP message" nocase
+        $fatal = "PHP Fatal error" nocase
+    condition:
+        any of them
+}`,
+  `rule directory_index_forbidden
+{
+    meta:
+        name = "디렉터리 색인 금지"
+        description = "nginx directory index of ... is forbidden, apache AH01276 Directory index forbidden by Options directive."
+    strings:
+        $nginx  = "directory index of" nocase
+        $apache = "Directory index forbidden" nocase
+    condition:
+        any of them
+}`,
+];
+
+/** `$id`만 쓴 서명이 적용될 필드. 접근 로그는 경로, 에러 로그는 메시지. */
+export function defaultRuleField(kind: LogKind): CondField {
+  return kind === "error" ? "message" : "request_target";
+}
+
+function compileBuiltin(src: string, kind: LogKind): Rule {
+  const r = parseRule(src, { defaultField: defaultRuleField(kind) });
   if (!r.ok) throw new Error(`기본 룰 파싱 실패: ${r.errors[0].message}\n${src}`);
   return { id: `builtin:${r.rule.id}`, name: r.rule.name, description: r.rule.description, source: src, expr: r.rule.expr, builtin: true };
 }
@@ -206,7 +341,19 @@ export const BOOKMARK_RULE: Rule = {
   legacyFilter: { ...emptyFilter(), bookmarked_only: true },
 };
 
-export const BUILTIN_RULES: Rule[] = [BOOKMARK_RULE, ...BUILTIN_SOURCES.map(compileBuiltin)];
+export const BUILTIN_RULES: Rule[] = [BOOKMARK_RULE, ...BUILTIN_SOURCES.map((s) => compileBuiltin(s, "access"))];
+
+export const BUILTIN_ERROR_RULES: Rule[] = [BOOKMARK_RULE, ...BUILTIN_ERROR_SOURCES.map((s) => compileBuiltin(s, "error"))];
+
+/** 로그 종류별 기본 룰. 북마크 룰은 두 종류가 함께 쓴다. */
+export function builtinRules(kind: LogKind): Rule[] {
+  return kind === "error" ? BUILTIN_ERROR_RULES : BUILTIN_RULES;
+}
+
+/** 사이드바에 보일 목록: 그 종류의 기본 룰 + 그 종류로 저장된 사용자 룰(종류를 적지 않은 옛 뷰는 접근 로그). */
+export function rulesFor(kind: LogKind, views: SavedView[]): Rule[] {
+  return [...builtinRules(kind), ...views.filter((v) => (v.definition.filter.log_kind ?? "access") === kind).map(ruleFromView)];
+}
 
 /** 룰을 실제 조회 조건으로. 시간·활성 같은 화면 조건은 base로 얹는다. */
 export function ruleFilter(rule: Rule, base: Partial<LogFilter> = {}): LogFilter {
@@ -218,7 +365,7 @@ export function ruleFilter(rule: Rule, base: Partial<LogFilter> = {}): LogFilter
 export function ruleFromView(v: SavedView): Rule {
   const src = v.definition.rule_source;
   if (src) {
-    const r = parseRule(src);
+    const r = parseRule(src, { defaultField: defaultRuleField(v.definition.filter.log_kind ?? "access") });
     if (r.ok) return { id: `view:${v.view_id}`, name: v.name, description: r.rule.description, source: src, expr: r.rule.expr, builtin: false, viewId: v.view_id };
     return {
       id: `view:${v.view_id}`,

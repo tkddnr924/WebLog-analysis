@@ -16,7 +16,9 @@ use weblog_engine::importer::resume_import;
 use weblog_engine::importer::{run_import, ImportConfig, ImportRequest};
 use weblog_engine::preview::{preview_file, PreviewConfig};
 use weblog_engine::source::{scan_directory, ScanOptions};
-use weblog_engine::store::{LogFilter, LogQuery, PageRequest, SortOrder, Store, StoreConfig};
+use weblog_engine::store::{
+    LogFilter, LogKind, LogQuery, PageRequest, SortOrder, Store, StoreConfig,
+};
 
 #[derive(Parser)]
 #[command(name = "weblog", about = "WebLog 엔진 선행 실험 CLI", version)]
@@ -91,6 +93,9 @@ enum Command {
         /// 재파싱: 이 작업을 대체하는 새 결과 버전을 만든다(완료 후 `activate` 필요).
         #[arg(long)]
         replaces_job: Option<i64>,
+        /// 로그 종류(access 또는 error). 조회 화면이 이 값으로 결과를 나눈다.
+        #[arg(long, default_value = "access")]
+        log_kind: String,
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },
@@ -396,6 +401,7 @@ fn main() -> Result<()> {
             temp_dir,
             progress,
             replaces_job,
+            log_kind,
             paths,
         } => {
             let profile = load_profile(&format)?;
@@ -417,6 +423,7 @@ fn main() -> Result<()> {
                 profile,
                 paths,
                 replaces_job_id: replaces_job,
+                log_kind: LogKind::parse(&log_kind),
             };
             let summary = run_import(&mut store, &req, &cfg, &cancel, &mut |p| {
                 if progress {
@@ -475,6 +482,7 @@ fn main() -> Result<()> {
                 method,
                 target_contains,
                 target_regex,
+                log_kind: None,
                 expr: None,
                 bookmarked_only: false,
                 active_only: false,

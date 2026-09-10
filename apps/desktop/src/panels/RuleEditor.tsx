@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  ERROR_RULE_TEMPLATE,
   RULE_TEMPLATE,
   describeExpr,
   parseRule,
@@ -16,22 +17,26 @@ import {
 import { completions, highlightLines } from "../lib/yaraHighlight";
 import { api, errorText } from "../api";
 import { useAppState } from "../state";
-import { emptyFilter } from "../types";
+import { defaultRuleField } from "../lib/rules";
+import { emptyFilter, type LogKind } from "../types";
 import { formatCount } from "../lib/format";
 
 export function RuleEditor({
+  kind,
   initial,
   title,
   onCancel,
   onSave,
 }: {
+  /** 편집 중인 룰이 어느 로그 종류의 것인지. 기본 필드·예시·일치 건수가 달라진다. */
+  kind: LogKind;
   initial: string | null;
   title: string;
   onCancel: () => void;
   onSave: (rule: ParsedRule, source: string) => Promise<void>;
 }) {
   const { project } = useAppState();
-  const [src, setSrc] = useState(initial ?? RULE_TEMPLATE);
+  const [src, setSrc] = useState(initial ?? (kind === "error" ? ERROR_RULE_TEMPLATE : RULE_TEMPLATE));
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [count, setCount] = useState<
@@ -45,7 +50,7 @@ export function RuleEditor({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const hlRef = useRef<HTMLPreElement>(null);
-  const parsed = useMemo(() => parseRule(src), [src]);
+  const parsed = useMemo(() => parseRule(src, { defaultField: defaultRuleField(kind) }), [src, kind]);
   const lines = src.split("\n").length;
   const hl = useMemo(() => highlightLines(src), [src]);
   const errorLine = parsed.ok ? -1 : parsed.errors[0].line;
@@ -126,6 +131,7 @@ export function RuleEditor({
       const n = await api.countLogs({
         ...emptyFilter(),
         active_only: true,
+        log_kind: kind,
         expr: parsed.rule.expr,
       });
       setCount({ n, forSrc: mine });
@@ -386,7 +392,7 @@ export function RuleEditor({
               </div>
             )}
             {saveError && <div className="issue">{saveError}</div>}
-            <Palette src={src} onInsert={insert} onDragStart={onDragStart} />
+            <Palette kind={kind} src={src} onInsert={insert} onDragStart={onDragStart} />
             <details className="help">
               <summary className="help-title">문법 전체</summary>
               <pre className="mono small">{HELP}</pre>
@@ -453,6 +459,11 @@ const FIELD_SNIPS: Snip[] = [
   },
   { label: "ua", text: "ua", cls: "kind-user_agent", hint: "User-Agent" },
 ];
+const ERROR_FIELD_SNIPS: Snip[] = [
+  { label: "level", text: "level", cls: "kind-status", hint: "에러 레벨(error, crit, warn…)" },
+  { label: "message", text: "message", cls: "kind-request_target", hint: "에러 메시지 본문" },
+  { label: "ip", text: "ip", cls: "kind-client_ip", hint: "클라이언트 IP" },
+];
 const OP_SNIPS: Snip[] = [
   { label: "==", text: '== "…"' },
   { label: "!=", text: '!= "…"' },
@@ -501,13 +512,23 @@ const BLOCK_SNIPS: Snip[] = [
   { label: "봇 UA", text: "ua matches /python|curl|wget/i" },
   { label: "관리자 경로", text: 'path startswith "/admin"' },
 ];
+const ERROR_BLOCK_SNIPS: Snip[] = [
+  { label: '$s = "텍스트"', text: '$s = "…"', hint: "strings: 안에 넣는 문자열 서명" },
+  { label: "$s = /정규식/ nocase", text: "$s = /…/ nocase" },
+  { label: "심각도", text: "level matches /crit|alert|emerg/i" },
+  { label: "오류만", text: "level matches /error/i" },
+  { label: "파일 없음", text: 'message contains "No such file or directory"' },
+  { label: "업스트림 실패", text: 'message contains "Connection refused"' },
+];
 
 /** 끌어 놓거나 눌러서 넣는 조각 팔레트. 현재 원문에 정의된 $문자열도 함께 보여준다. */
 function Palette({
+  kind,
   src,
   onInsert,
   onDragStart,
 }: {
+  kind: LogKind;
   src: string;
   onInsert: (s: string) => void;
   onDragStart: (s: string) => (e: DragEvent<HTMLElement>) => void;
@@ -553,10 +574,10 @@ function Palette({
           cls: "kind-text",
         })),
       )}
-      {group("필드", FIELD_SNIPS)}
+      {group("필드", kind === "error" ? ERROR_FIELD_SNIPS : FIELD_SNIPS)}
       {group("연산", OP_SNIPS)}
       {group("논리", LOGIC_SNIPS)}
-      {group("조각", BLOCK_SNIPS)}
+      {group("조각", kind === "error" ? ERROR_BLOCK_SNIPS : BLOCK_SNIPS)}
     </div>
   );
 }
@@ -569,7 +590,7 @@ const HELP = `rule 식별자 {
     $a = "텍스트"           부분 문자열 (nocase: 대소문자 무시)
     $b = /정규식/ nocase    RE2 문법, 룩어라운드 없음
   condition:
-    $a                     경로(path)에 $a가 있음
+    $a                     기본 필드(접근: path, 에러: message)에 $a가 있음
     ua contains $b         다른 필드에 적용
     any of them            정의한 문자열 중 하나라도
     all of ($a*)           이름이 a로 시작하는 문자열 모두
@@ -580,7 +601,10 @@ const HELP = `rule 식별자 {
     ip == "10.0.0.1"
     path startswith "/api"   endswith, contains, icontains, matches
     referrer is null       is not null
+    level matches /crit/i  에러 로그 레벨
+    message contains "…"   에러 로그 메시지
     and · or · not · ( )
 }
 
-필드: status  bytes  method  ip  path  protocol  referrer  ua`;
+접근 로그 필드: status  bytes  method  ip  path  protocol  referrer  ua
+에러 로그 필드: level  message(msg)`;

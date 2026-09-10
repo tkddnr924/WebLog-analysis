@@ -199,9 +199,14 @@ export interface PreviewResult {
   truncated: boolean;
 }
 
+/** 로그 종류. 시작 화면의 탭과 조회 필터가 함께 쓴다. 접근 로그와 에러 로그는 폴더·패턴·라벨 어휘가 다르다. */
+export type LogKind = "access" | "error";
+
 export interface StartImportRequest {
   profile: ProfileSpec;
   paths: string[];
+  /** 가져오기 시작 시 정한다. 조회 화면은 이 값으로 두 종류를 나눈다. */
+  log_kind: LogKind;
   replaces_job_id: number | null;
   batch_max_rows: number | null;
   batch_max_bytes: number | null;
@@ -253,9 +258,11 @@ export interface LogFilter {
   /** 북마크한 행만. */
   bookmarked_only: boolean;
   active_only: boolean;
+  /** 로그 종류. null이면 전체. */
+  log_kind: LogKind | null;
 }
 
-export type CondField = "status" | "bytes_sent" | "client_ip" | "method" | "request_target" | "protocol" | "referrer" | "user_agent";
+export type CondField = "status" | "bytes_sent" | "client_ip" | "method" | "request_target" | "protocol" | "referrer" | "user_agent" | "extra" | "level" | "message";
 export type CondOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "contains" | "icontains" | "starts_with" | "ends_with" | "regex" | "is_null";
 
 /** Rust `FilterExpr`와 같은 구조(serde tag = kind). */
@@ -294,6 +301,8 @@ export interface LogRow {
   status: number | null;
   bytes_sent: number | null;
   bookmarked: boolean;
+  /** 에러 전용 필드가 담긴 JSON 객체 문자열. 접근 로그는 보통 null. */
+  extra_json: string | null;
 }
 
 export interface LogPage {
@@ -354,6 +363,7 @@ export const emptyFilter = (): LogFilter => ({
   expr: null,
   bookmarked_only: false,
   active_only: false,
+  log_kind: null,
 });
 
 export type TimeBucket = "auto" | "minute" | "hour" | "day";
@@ -376,6 +386,10 @@ export interface StatsResult {
   /** 상위 IP의 최초·마지막 탐지와 접근 횟수. */
   ip_rows: { ip: string; first_seen: number | null; last_seen: number | null; count: number }[];
   top_targets: [string, number][];
+  /** 에러 로그 레벨별 건수(많은 순). 접근 로그 조건이면 빈 배열. */
+  levels: [string | null, number][];
+  /** 상위 에러 메시지(많은 순). 접근 로그 조건이면 빈 배열. */
+  top_messages: [string, number][];
   timeline: [number, number][];
   bucket_seconds: number;
   timeline_truncated: boolean;

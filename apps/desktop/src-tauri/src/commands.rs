@@ -15,7 +15,7 @@ use weblog_service::{
 };
 use weblog_service::{ExportFinishedView, ExportProgressView};
 
-use crate::ServiceState;
+use crate::{applog, ServiceState};
 
 fn owned(state: &ServiceState<'_>) -> Arc<Service> {
     Arc::clone(state.inner())
@@ -43,7 +43,12 @@ pub async fn open_project(state: ServiceState<'_>, db_path: String) -> ServiceRe
 #[tauri::command(rename_all = "snake_case")]
 pub async fn create_case(state: ServiceState<'_>, name_hint: String) -> ServiceResult<ProjectInfo> {
     let s = owned(&state);
-    blocking(move || s.create_case(&name_hint)).await
+    let result = blocking(move || s.create_case(&name_hint)).await;
+    match &result {
+        Ok(info) => applog::info(&format!("케이스 생성 {}", info.db_path)),
+        Err(e) => applog::error(&format!("케이스 생성 실패: {e}")),
+    }
+    result
 }
 
 /// cases/ 안의 케이스 DB 목록.
@@ -161,7 +166,27 @@ pub async fn start_import(
     request: StartImportRequest,
 ) -> ServiceResult<i64> {
     let s = owned(&state);
-    blocking(move || s.start_import(request)).await
+    // 크래시 추적: 어떤 입력으로 시작했는지 남긴다. 경로와 크기만 남기고 내용은 남기지 않는다.
+    let total_bytes: u64 = request
+        .paths
+        .iter()
+        .map(|p| std::fs::metadata(p).map_or(0, |m| m.len()))
+        .sum();
+    applog::info(&format!(
+        "가져오기 요청 kind={:?} files={} bytes={total_bytes} first={}",
+        request.log_kind,
+        request.paths.len(),
+        request
+            .paths
+            .first()
+            .map_or_else(String::new, |p| p.display().to_string())
+    ));
+    let result = blocking(move || s.start_import(request)).await;
+    match &result {
+        Ok(job) => applog::info(&format!("가져오기 시작됨 job={job}")),
+        Err(e) => applog::error(&format!("가져오기 시작 실패: {e}")),
+    }
+    result
 }
 
 #[tauri::command(rename_all = "snake_case")]

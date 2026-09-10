@@ -1,6 +1,6 @@
 [package]
 name = "weblog-desktop"
-version = "0.1.2"
+version = "0.1.3"
 description = "WebLog 데스크톱 앱(Tauri 2). lib.rs는 조립·명령 등록만 담당한다"
 edition.workspace = true
 rust-version.workspace = true
@@ -21,6 +21,11 @@ tauri.workspace = true
 tauri-plugin-dialog.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# 로그 파일 타임스탬프(한국 시간 표기).
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

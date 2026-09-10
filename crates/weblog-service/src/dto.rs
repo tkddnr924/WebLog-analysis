@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use weblog_engine::format::FormatProfile;
 use weblog_engine::importer::ImportSummary;
-use weblog_engine::store::{JobInfo, JobSource, LogDetail};
+use weblog_engine::store::{JobInfo, JobSource, LogDetail, LogKind};
 
 /// 열린 프로젝트 정보.
 #[derive(Debug, Clone, Serialize)]
@@ -188,6 +188,9 @@ pub struct StartImportRequest {
     /// 대체할 이전 작업(재파싱).
     #[serde(default)]
     pub replaces_job_id: Option<i64>,
+    /// 로그 종류(접근·에러). 지정하지 않으면 접근 로그.
+    #[serde(default)]
+    pub log_kind: LogKind,
     /// 배치 최대 행 수.
     #[serde(default)]
     pub batch_max_rows: Option<usize>,

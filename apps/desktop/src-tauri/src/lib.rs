@@ -1,6 +1,8 @@
 //! 앱 조립과 명령 등록. 핵심 로직은 `weblog-service`와 `weblog-engine`에 있다.
 
+mod applog;
 mod commands;
+mod paths;
 
 use std::sync::Arc;
 
@@ -16,17 +18,29 @@ pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
-            // 사용자 프리셋은 앱 설정 디렉터리 아래 presets/ 에 YAML로 둔다.
-            let profiles_dir = app.path().app_config_dir().ok().map(|d| d.join("presets"));
-            // 케이스 DB는 앱 데이터 디렉터리 아래 cases/ 에 자동 생성한다. 사용자에게 위치를 묻지 않는다.
-            let cases_dir = app.path().app_data_dir().ok().map(|d| d.join("cases"));
+            // 케이스·프리셋·로그는 실행 파일 옆에 둔다. 설치 폴더가 읽기 전용이면 임시 폴더로 물러난다.
+            let (root, fallback_note) = paths::data_root(paths::exe_dir());
+            let log_path = applog::init(&root.join("logs")).ok();
+            applog::install_panic_hook();
+            applog::info(&format!(
+                "앱 시작 version={} root={} log={}",
+                env!("CARGO_PKG_VERSION"),
+                root.display(),
+                log_path
+                    .as_ref()
+                    .map_or_else(|| "없음".to_owned(), |p| p.display().to_string())
+            ));
+            if let Some(note) = &fallback_note {
+                applog::error(note);
+            }
             let service = Arc::new(Service::new(ServiceConfig {
-                profiles_dir,
-                cases_dir,
+                profiles_dir: Some(root.join("presets")),
+                cases_dir: Some(root.join("cases")),
                 ..ServiceConfig::default()
             }));
             let handle = app.handle().clone();
             service.set_event_sink(move |event: ServiceEvent| {
+                applog::log_event(&event);
                 // 이벤트 전송 실패(창 닫힘 등)는 무시한다. 상태는 import_status로 다시 조회할 수 있다.
                 let _ = handle.emit(IMPORT_EVENT, &event);
             });

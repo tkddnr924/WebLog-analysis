@@ -86,6 +86,7 @@ fn imported_rows_match_preview_records_field_by_field() {
             profile: load_profile(profile),
             paths: vec![fixture(log)],
             replaces_job_id: None,
+            log_kind: weblog_engine::store::LogKind::Access,
         };
         let cfg = ImportConfig {
             batch_max_rows: 3,
@@ -193,6 +194,7 @@ fn error_rows_carry_position_and_code_but_never_input_text() {
         profile: presets::apache_combined(),
         paths: vec![fixture("apache_combined.log")],
         replaces_job_id: None,
+        log_kind: weblog_engine::store::LogKind::Access,
     };
     let summary = run_import(
         &mut store,

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, errorText } from "../api";
-import { useAppState, type ImportItem, type LogKind } from "../state";
+import { useAppState, type ImportItem } from "../state";
 import { CasesPanel } from "./CasesPanel";
 import { formatBytes, formatCount } from "../lib/format";
 import { baseName, compareNatural, relativeTo } from "../lib/paths";
@@ -25,7 +25,7 @@ import {
   type RoleDef,
   type Separator,
 } from "../lib/puzzle";
-import type { FormatProfile, LineOutcome, PreviewResult, ProfileSpec, ProfileView, ScannedFile, ServerHint } from "../types";
+import type { FormatProfile, LineOutcome, LogKind, PreviewResult, ProfileSpec, ProfileView, ScannedFile, ServerHint } from "../types";
 
 const SERVERS: { id: ServerHint; label: string }[] = [
   { id: "apache", label: "Apache" },
@@ -332,7 +332,7 @@ export function StartPanel() {
         skipped.push(k.label);
         continue;
       }
-      items.push({ label: k.label, request: { profile: sp, paths: sel.files.map((f) => f.path), replaces_job_id: null, batch_max_rows: null, batch_max_bytes: null } });
+      items.push({ label: k.label, request: { profile: sp, paths: sel.files.map((f) => f.path), log_kind: k.id, replaces_job_id: null, batch_max_rows: null, batch_max_bytes: null } });
     }
     if (items.length === 0) {
       setNotice(skipped.length > 0 ? `${skipped.join(", ")}에 읽을 수 있는 줄이 없습니다.` : "가져올 파일을 하나 이상 선택하세요.");

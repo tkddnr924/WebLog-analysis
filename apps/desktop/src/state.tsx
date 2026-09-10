@@ -1,13 +1,10 @@
 // 앱 전역 상태: 열린 프로젝트, 진행 중 가져오기, 단계 선택. 단순한 컨텍스트로 둔다.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, errorText } from "./api";
-import type { ExportFinishedView, ExportProgressView, FormatProfile, ImportFinishedView, ImportProgressView, LogFilter, ProjectInfo, ScanResponse, ScannedFile, ServerHint, StartImportRequest } from "./types";
+import type { ExportFinishedView, ExportProgressView, FormatProfile, ImportFinishedView, ImportProgressView, LogFilter, LogKind, ProjectInfo, ScanResponse, ScannedFile, ServerHint, StartImportRequest } from "./types";
 
 /** 화면 흐름: 시작(폴더·포맷 확인) → 파싱 중 → 결과. */
 export type Stage = "start" | "importing" | "results";
-
-/** 시작 화면의 탭. 접근 로그와 에러 로그는 폴더·패턴·라벨 어휘가 다르다. */
-export type LogKind = "access" | "error";
 
 /** 한 번의 "파싱 시작"으로 차례로 실행할 가져오기. 엔진은 한 번에 하나만 돌리므로 큐로 잇는다. */
 export interface ImportItem {

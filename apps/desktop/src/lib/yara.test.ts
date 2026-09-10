@@ -113,6 +113,37 @@ describe("parseRule", () => {
     expect(bad(`rule r { condition: bytes contains "x" }`)).toMatch(/문자열 연산을 쓸 수 없습니다/);
   });
 
+  it("reads the error log fields and keeps them textual", () => {
+    const r = ok(`rule e {
+      strings:
+        $refused = "Connection refused"
+        $sev = /crit|alert|emerg/ nocase
+      condition:
+        level == "error" or message contains $refused or msg icontains "PHP message" or level matches $sev
+    }`);
+    if (r.expr.kind !== "or") throw new Error("or 조건식이어야 함");
+    const items = r.expr.items;
+    expect(items).toContainEqual(cond("level", "eq", "error"));
+    expect(items).toContainEqual(cond("message", "contains", "Connection refused"));
+    expect(items).toContainEqual(cond("message", "icontains", "PHP message"));
+    expect(items).toContainEqual(cond("level", "regex", "(?i)crit|alert|emerg"));
+    expect(bad(`rule e { condition: level > 3 }`)).toMatch(/==, != 만/);
+    expect(bad(`rule e { condition: message in 1..2 }`)).toMatch(/숫자 필드에만/);
+  });
+
+  it("puts bare signatures on the given default field", () => {
+    const src = `rule e { strings: $a = "No such file" $b = /timed out/ nocase condition: any of them }`;
+    expect(ok(src).expr).toEqual({ kind: "or", items: [cond("request_target", "contains", "No such file"), cond("request_target", "regex", "(?i)timed out")] });
+    const r = parseRule(src, { defaultField: "message" });
+    if (!r.ok) throw new Error(r.errors[0].message);
+    expect(r.rule.expr).toEqual({ kind: "or", items: [cond("message", "contains", "No such file"), cond("message", "regex", "(?i)timed out")] });
+  });
+
+  it("describes the error fields in Korean", () => {
+    expect(describeExpr(cond("level", "eq", "error"))).toBe("레벨 = error");
+    expect(describeExpr(cond("message", "icontains", "PHP"))).toBe("메시지 포함(대소문자 무시) PHP");
+  });
+
   it("describes expressions in Korean", () => {
     const r = ok(`rule d { strings: $a = "x" condition: status in 400..499 and not $a }`);
     expect(describeExpr(r.expr)).toBe("상태 ≥ 400 그리고 상태 ≤ 499 그리고 아님(경로 포함 x)");

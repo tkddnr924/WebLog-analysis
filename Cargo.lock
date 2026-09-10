@@ -4895,13 +4895,15 @@ dependencies = [
 
 [[package]]
 name = "weblog-desktop"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
+ "chrono",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tempfile",
  "weblog-engine",
  "weblog-service",
 ]

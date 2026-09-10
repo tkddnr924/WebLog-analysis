@@ -218,6 +218,12 @@ button.icon { width: 26px; height: 26px; padding: 0; font-size: 16px; line-heigh
 .rule-edit:hover { color: var(--accent); }
 .rules-sep { margin: 8px 10px 2px; font-size: 11.5px; color: var(--muted); }
 
+/* 로그 종류 선택은 탭보다 상위다. 알약 모양으로 크게 두어 아래 탭과 층이 구분되게 한다. */
+.kind-switch { display: flex; gap: 8px; margin-bottom: 10px; }
+.kind-switch button { padding: 7px 20px; font-size: 15px; font-weight: 500; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
+.kind-switch button:hover { color: var(--ink); background: var(--surface-2); }
+.kind-switch button.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+
 .main-tabs { margin-bottom: 12px; }
 .main-tabs button { font-size: 14px; }
 .results-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -285,6 +291,8 @@ td.ok { color: var(--s2); }
 .query-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
 .table-wrap.virtual { flex: 1; max-height: none; position: relative; }
 .vhead, .vrow { display: grid; grid-template-columns: 24px 160px 150px 64px 1fr 56px 80px 100px; column-gap: 10px; align-items: center; padding: 0 10px; }
+/* 에러 로그는 컬럼이 다르다. 메시지가 남는 폭을 차지하고 한 줄로 줄인다. */
+.vhead.verr, .vrow.verr { grid-template-columns: 24px 160px 124px 150px minmax(0, 1fr) 100px; }
 .vhead { position: sticky; top: 0; z-index: 1; background: var(--surface-2); border-bottom: 1px solid var(--line); height: 28px; font-weight: 600; }
 .vrow { position: absolute; left: 0; right: 0; top: 0; border-bottom: 1px solid #eee9e0; cursor: default; }
 .vrow:hover { background: var(--surface-2); }

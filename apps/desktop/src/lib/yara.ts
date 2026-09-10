@@ -11,9 +11,10 @@
 //       status in 200..299 and ($union or $quote)
 //   }
 //
-// 필드: status, bytes, method, ip, path, protocol, referrer, ua
+// 접근 로그 필드: status, bytes, method, ip, path, protocol, referrer, ua
+// 에러 로그 필드: level, message(msg) — 문자열 연산만 쓴다.
 // 연산: == != > >= < <=, in a..b, contains, icontains, startswith, endswith, matches, is null, is not null
-// 문자열: $id = "텍스트" [nocase] | $id = /정규식/ [nocase]. 필드 없이 $id만 쓰면 path에 적용한다.
+// 문자열: $id = "텍스트" [nocase] | $id = /정규식/ [nocase]. 필드 없이 $id만 쓰면 기본 필드(접근 로그는 path, 에러 로그는 message)에 적용한다.
 // 묶음: any of them, all of them, any of ($a, $b*), all of ($a*)
 import type { CondField, CondOp, FilterExpr } from "../types";
 
@@ -50,6 +51,9 @@ const FIELDS: Record<string, CondField> = {
   referer: "referrer",
   ua: "user_agent",
   user_agent: "user_agent",
+  level: "level",
+  message: "message",
+  msg: "message",
 };
 
 const NUMERIC: Set<CondField> = new Set(["status", "bytes_sent"]);
@@ -209,7 +213,10 @@ function tokenize(src: string): Tok[] {
 class Parser {
   private pos = 0;
   private strings = new Map<string, StringDef>();
-  constructor(private toks: Tok[]) {}
+  constructor(
+    private toks: Tok[],
+    private defaultField: CondField,
+  ) {}
 
   private peek(): Tok {
     return this.toks[this.pos];
@@ -334,7 +341,7 @@ class Parser {
     const t = this.peek();
     if (t.t === "var") {
       this.next();
-      return this.stringTerm("request_target", t.v, t);
+      return this.stringTerm(this.defaultField, t.v, t);
     }
     if (t.t === "ident") {
       const w = t.v.toLowerCase();
@@ -350,12 +357,12 @@ class Parser {
         this.next();
         this.expectIdent("of");
         const ids = this.stringSet();
-        const items = ids.map((id) => this.stringTerm("request_target", id, t));
+        const items = ids.map((id) => this.stringTerm(this.defaultField, id, t));
         if (items.length === 0) this.fail(t, "해당하는 문자열이 없습니다");
         return w === "any" ? { kind: "or", items } : { kind: "and", items };
       }
       const field = FIELDS[w];
-      if (!field) this.fail(t, `알 수 없는 필드: ${t.v} (status, bytes, method, ip, path, protocol, referrer, ua)`);
+      if (!field) this.fail(t, `알 수 없는 필드: ${t.v} (status, bytes, method, ip, path, protocol, referrer, ua, level, message)`);
       this.next();
       return this.fieldTerm(field, t);
     }
@@ -482,12 +489,17 @@ function checkRegex(pattern: string, at: Tok): void {
   if (/\(\?[=!<]/.test(pattern)) throw new RuleSyntaxError(at.line, at.col, "룩어라운드(?=, ?!, ?<)는 지원하지 않습니다");
 }
 
+export interface ParseOptions {
+  /** `$id`만 쓴 서명이 적용될 필드. 접근 로그는 경로, 에러 로그는 메시지. */
+  defaultField?: CondField;
+}
+
 /** 룰 텍스트를 파싱한다. 실패하면 위치가 있는 오류 목록. */
-export function parseRule(src: string): ParseResult {
+export function parseRule(src: string, opts: ParseOptions = {}): ParseResult {
   try {
     const toks = tokenize(src);
     if (toks.length === 1) return { ok: false, errors: [{ line: 1, col: 1, message: "룰이 비어 있습니다" }] };
-    const rule = new Parser(toks).rule();
+    const rule = new Parser(toks, opts.defaultField ?? "request_target").rule();
     return { ok: true, rule };
   } catch (e) {
     if (e instanceof RuleSyntaxError) return { ok: false, errors: [{ line: e.line, col: e.col, message: e.message }] };
@@ -497,7 +509,8 @@ export function parseRule(src: string): ParseResult {
 
 /** 조건식을 한 줄 요약으로. 저장된 룰의 툴팁에 쓴다. */
 export function describeExpr(e: FilterExpr): string {
-  const name = (f: CondField) => ({ status: "상태", bytes_sent: "응답 크기", client_ip: "IP", method: "메서드", request_target: "경로", protocol: "프로토콜", referrer: "리퍼러", user_agent: "UA" })[f];
+  const name = (f: CondField) =>
+    ({ status: "상태", bytes_sent: "응답 크기", client_ip: "IP", method: "메서드", request_target: "경로", protocol: "프로토콜", referrer: "리퍼러", user_agent: "UA", extra: "확장 필드", level: "레벨", message: "메시지" })[f];
   switch (e.kind) {
     case "true":
       return "전체";
@@ -515,7 +528,7 @@ export function describeExpr(e: FilterExpr): string {
   }
 }
 
-/** 새 룰 편집기의 시작 텍스트. */
+/** 새 접근 룰 편집기의 시작 텍스트. */
 export const RULE_TEMPLATE = `rule my_rule
 {
     meta:
@@ -528,5 +541,21 @@ export const RULE_TEMPLATE = `rule my_rule
 
     condition:
         status in 400..499 and ($sig1 or $sig2)
+}
+`;
+
+/** 새 에러 룰 편집기의 시작 텍스트. `$id`만 쓴 서명은 메시지에 걸린다. */
+export const ERROR_RULE_TEMPLATE = `rule my_error_rule
+{
+    meta:
+        name = "내 에러 룰"
+        description = "무엇을 찾는 룰인지"
+
+    strings:
+        $sig1 = "Connection refused"
+        $sig2 = /upstream timed out/ nocase
+
+    condition:
+        level matches /error|crit/i and any of them
 }
 `;

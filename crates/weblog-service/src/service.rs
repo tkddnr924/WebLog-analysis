@@ -617,6 +617,7 @@ impl Service {
             profile,
             paths: req.paths,
             replaces_job_id: req.replaces_job_id,
+            log_kind: req.log_kind,
         };
         self.spawn_import(project, cfg, ImportKind::New(engine_req))
     }
@@ -1100,6 +1101,7 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::path::Path;
+    use weblog_engine::store::LogKind;
 
     const LINE: &str =
         r#"10.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /x HTTP/1.0" 200 10 "-" "ua""#;
@@ -1170,6 +1172,7 @@ mod tests {
                 profile: preset("apache_combined"),
                 paths: vec![log],
                 replaces_job_id: None,
+                log_kind: LogKind::Access,
                 batch_max_rows: Some(1_000),
                 batch_max_bytes: None,
             })
@@ -1208,6 +1211,7 @@ mod tests {
                 profile: preset("combined"),
                 paths: vec![log],
                 replaces_job_id: None,
+                log_kind: LogKind::Access,
                 batch_max_rows: Some(5_000),
                 batch_max_bytes: None,
             })
@@ -1243,6 +1247,7 @@ mod tests {
                 profile: preset("combined"),
                 paths: vec![log],
                 replaces_job_id: None,
+                log_kind: LogKind::Access,
                 batch_max_rows: Some(1_000_000),
                 batch_max_bytes: Some(1 << 30),
             })
@@ -1271,6 +1276,7 @@ mod tests {
                 profile: preset("combined"),
                 paths: vec![dir.path().join("missing.log")],
                 replaces_job_id: None,
+                log_kind: LogKind::Access,
                 batch_max_rows: None,
                 batch_max_bytes: None,
             })
@@ -1340,6 +1346,7 @@ mod tests {
                 profile: preset("apache_combined"),
                 paths: vec![log.clone()],
                 replaces_job_id: None,
+                log_kind: LogKind::Access,
                 batch_max_rows: None,
                 batch_max_bytes: None,
             })
@@ -1362,6 +1369,7 @@ mod tests {
                 profile: preset("site_v2"),
                 paths: vec![log],
                 replaces_job_id: Some(first),
+                log_kind: LogKind::Access,
                 batch_max_rows: None,
                 batch_max_bytes: None,
             })
@@ -1396,6 +1404,7 @@ mod tests {
                 profile: ProfileSpec::Definition { profile: bad },
                 paths: vec![dir.path().join("x.log")],
                 replaces_job_id: None,
+                log_kind: LogKind::Access,
                 batch_max_rows: None,
                 batch_max_bytes: None,
             })
@@ -1415,6 +1424,7 @@ mod tests {
                 profile: preset("apache_combined"),
                 paths: vec![log],
                 replaces_job_id: None,
+                log_kind: LogKind::Access,
                 batch_max_rows: None,
                 batch_max_bytes: None,
             })
