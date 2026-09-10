@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { api, errorText } from "../api";
 import { useAppState } from "../state";
 import { DISPLAY_OFFSET_SECONDS, formatCount, formatTime } from "../lib/format";
+import { applyScope } from "../lib/scope";
 import { emptyFilter, type StatsResult } from "../types";
 
 /** 시간축 막대 그래프. 단일 계열이라 색 하나만 쓰고, 값은 호버 툴팁과 표로 읽는다. */
 type IpSort = "count" | "first" | "last";
 
-/** IP별 최초·마지막 탐지와 접근 횟수. 머리글을 눌러 정렬한다. 에러 통계도 같은 표를 쓴다. */
-export function IpTable({ rows }: { rows: StatsResult["ip_rows"] }) {
+/**
+ * IP별 최초·마지막 탐지와 접근 횟수. 머리글을 눌러 정렬한다. 에러 통계도 같은 표를 쓴다.
+ * 표는 상위 N만 보여주므로 전체 목록이 필요하면 CSV로 내보낸다.
+ */
+export function IpTable({ rows, onExport }: { rows: StatsResult["ip_rows"]; onExport: () => Promise<void> }) {
   const [sort, setSort] = useState<{ key: IpSort; desc: boolean }>({ key: "count", desc: true });
+  const [saving, setSaving] = useState(false);
   const sorted = useMemo(() => {
     const v = (r: StatsResult["ip_rows"][number]) => (sort.key === "count" ? r.count : sort.key === "first" ? (r.first_seen ?? Number.MAX_SAFE_INTEGER) : (r.last_seen ?? -1));
     return [...rows].sort((a, b) => (sort.desc ? v(b) - v(a) : v(a) - v(b)) || a.ip.localeCompare(b.ip));
@@ -21,16 +27,29 @@ export function IpTable({ rows }: { rows: StatsResult["ip_rows"] }) {
       <span className="sort-mark">{sort.key === key ? (sort.desc ? "▼" : "▲") : ""}</span>
     </th>
   );
+  const runExport = async () => {
+    setSaving(true);
+    try {
+      await onExport();
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div className="chart ip-table">
       <div className="chart-head">
         <span>클라이언트 IP · 상위 {rows.length}개</span>
         <span className="muted small">머리글을 눌러 정렬</span>
+        <span className="grow" />
+        <button type="button" className="chart-action" onClick={() => void runExport()} disabled={saving} title="조건에 맞는 IP 전체를 CSV로 저장합니다(상위 N 제한 없음)">
+          {saving ? "저장 중…" : "전체 CSV 저장"}
+        </button>
       </div>
       <div className="table-wrap">
         <table className="grid">
           <thead>
             <tr>
+              <th className="num rank">#</th>
               <th>IP</th>
               {head("first", "최초 탐지")}
               {head("last", "마지막 탐지")}
@@ -38,8 +57,9 @@ export function IpTable({ rows }: { rows: StatsResult["ip_rows"] }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => (
+            {sorted.map((r, i) => (
               <tr key={r.ip}>
+                <td className="num rank muted">{i + 1}</td>
                 <td className="mono">{r.ip}</td>
                 <td className="mono">{formatTime(r.first_seen)}</td>
                 <td className="mono">{formatTime(r.last_seen)}</td>
@@ -48,7 +68,7 @@ export function IpTable({ rows }: { rows: StatsResult["ip_rows"] }) {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={5} className="muted">
                   조건에 맞는 IP가 없습니다.
                 </td>
               </tr>
@@ -87,13 +107,18 @@ export function Bars({ title, rows, unit }: { title: string; rows: [string, numb
 }
 
 export function StatsPanel() {
-  const { project, setNotice, ruleRequest, appliedRange } = useAppState();
+  const { project, setNotice, ruleRequest, scope } = useAppState();
   const [activeOnly, setActiveOnly] = useState(true);
   const [topN, setTopN] = useState(20);
   const [stats, setStats] = useState<StatsResult | null>(null);
   const [loading, setLoading] = useState(false);
   // Only the newest request may write results; late answers to older conditions are dropped.
   const requestRef = useRef(0);
+
+  const statsFilter = useMemo(
+    () => applyScope({ ...(ruleRequest?.filter.log_kind === "access" ? ruleRequest.filter : emptyFilter()), active_only: activeOnly, log_kind: "access" }, scope),
+    [ruleRequest, activeOnly, scope],
+  );
 
   const run = useCallback(async () => {
     requestRef.current += 1;
@@ -102,13 +127,7 @@ export function StatsPanel() {
     try {
       const result = await api.computeStats({
         // 사이드바 접근 룰의 조건(상태·메서드·IP·경로) 위에 이 화면의 시간·작업·활성 조건을 얹는다. 집계는 접근 로그만 본다.
-        filter: {
-          ...(ruleRequest?.filter.log_kind === "access" ? ruleRequest.filter : emptyFilter()),
-          time_from_micros: appliedRange.from,
-          time_to_micros: appliedRange.to,
-          active_only: activeOnly,
-          log_kind: "access",
-        },
+        filter: statsFilter,
         top_n: topN,
         bucket: "auto",
         tz_offset_seconds: DISPLAY_OFFSET_SECONDS,
@@ -122,14 +141,25 @@ export function StatsPanel() {
     } finally {
       if (id === requestRef.current) setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedRange, activeOnly, topN, ruleRequest?.nonce, setNotice]);
+  }, [statsFilter, topN, setNotice]);
 
   // 룰을 고르거나 탭을 열면 바로 집계한다. 조건을 바꾼 뒤에는 "계산"으로 다시 돌린다.
   useEffect(() => {
     if (project) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.db_path, ruleRequest?.nonce, appliedRange.nonce]);
+  }, [project?.db_path, ruleRequest?.nonce, scope.nonce]);
+
+  /** 표에 보이는 상위 N이 아니라 조건에 맞는 IP 전체를 CSV로 저장한다. */
+  const exportIps = async () => {
+    try {
+      const path = await save({ defaultPath: "client-ips.csv", filters: [{ name: "CSV", extensions: ["csv"] }] });
+      if (typeof path !== "string" || path === "") return;
+      const rows = await api.exportIpStats(path, statsFilter);
+      setNotice(`IP ${formatCount(rows)}개를 ${path}에 저장했습니다.`);
+    } catch (e) {
+      setNotice(errorText(e));
+    }
+  };
 
   const cancel = async () => {
     try {
@@ -182,7 +212,7 @@ export function StatsPanel() {
             전체 {formatCount(stats.total)}행 · 시간 미확정 {formatCount(stats.null_time_rows)}행 · 배치 {stats.max_batch_id}까지
             {stats.time_range && ` · ${formatTime(stats.time_range[0])} ~ ${formatTime(stats.time_range[1])}`}
           </div>
-          <IpTable rows={stats.ip_rows} />
+          <IpTable rows={stats.ip_rows} onExport={exportIps} />
           <div className="chart-grid">
             <Bars title="상태코드" rows={stats.status.map(([s, n]) => [s === null ? "(없음)" : String(s), n])} unit="건" />
             <Bars title="메서드" rows={stats.methods.map(([m, n]) => [m ?? "(없음)", n])} unit="건" />

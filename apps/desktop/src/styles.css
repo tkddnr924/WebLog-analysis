@@ -75,6 +75,8 @@ button:hover:not(:disabled) { border-color: #c4bdb1; }
 button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: #4f8b7b; }
+button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+button.danger:hover:not(:disabled) { background: var(--bad-bg); border-color: var(--bad); }
 button.linklike { background: none; border: none; color: var(--accent); padding: 0 4px; text-decoration: underline; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 input:not([type="checkbox"]), select {
@@ -211,6 +213,17 @@ details.advanced .form-grid { margin-top: 8px; }
 .grp-server.kind-integer { --role: #c07fb0; }
 .grp-misc.kind-text { --role: #9b8ec9; }
 .pill.kind-ignore { border-style: dashed; }
+
+/* 화이트리스트: 기간과 같은 층의 상위 조건이라 기간 상자 안에 둔다. */
+.whitelist-open { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; font-size: 12.5px; }
+.whitelist-open .count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 600; }
+.ip-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; max-height: 220px; overflow: auto; }
+.ip-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 10px; border-bottom: 1px solid #eef1f4; }
+.ip-list li:last-child { border-bottom: none; }
+
+/* 상위 IP 표: 번호 칸과 전체 CSV 저장 버튼. */
+.grid td.rank, .grid th.rank { width: 44px; font-variant-numeric: tabular-nums; }
+.chart-action { padding: 2px 10px; font-size: 12px; }
 
 /* 이전 케이스 목록 */
 .cases { width: min(760px, 100%); margin: 20px auto 0; }
@@ -449,7 +462,7 @@ button.icon.close:hover { color: var(--ink); }
 
 /* 통계 */
 .chart { margin: 14px 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
-.chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: 600; }
+.chart-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; font-weight: 600; }
 .timeline { width: 100%; height: auto; display: block; }
 .timeline .grid-line { stroke: var(--line); stroke-width: 1; }
 .timeline .axis-text { font-size: 11px; fill: var(--muted); }

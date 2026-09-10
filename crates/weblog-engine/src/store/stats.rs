@@ -1,5 +1,7 @@
 //! 기본 통계. 확정 배치 범위를 고정하고 결과 크기를 상한으로 제한한다. 무거운 조회이므로 호출자가 직렬화·취소를 관리한다.
 
+use std::io::Write;
+
 use duckdb::params_from_iter;
 use duckdb::types::Value;
 use serde::{Deserialize, Serialize};
@@ -7,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::query::{filter_sql, LogFilter, LogQuery};
 use super::LogKind;
 use crate::error::{EngineError, EngineResult};
+use crate::export::{csv_field, iso_utc};
 
 /// 상위 N 상한.
 pub const MAX_TOP_N: u32 = 100;
@@ -254,6 +257,47 @@ pub fn compute_stats(q: &impl LogQuery, req: &StatsRequest) -> EngineResult<Stat
         timeline_truncated,
         time_range,
     })
+}
+
+/// 조건에 맞는 모든 클라이언트 IP 집계를 CSV로 흘려 쓴다. 화면 표와 달리 상위 N 제한이 없다.
+/// 결과를 모아 두지 않고 한 줄씩 쓰므로 IP가 많아도 메모리가 늘지 않는다. 반환값은 쓴 줄 수.
+pub fn export_ip_stats<W: Write>(
+    q: &impl LogQuery,
+    filter: &LogFilter,
+    out: &mut W,
+) -> EngineResult<u64> {
+    let max_batch_id = q.max_committed_batch_id(filter.job_id)?;
+    let base = filter_sql(filter)?;
+    let conn = q.query_conn();
+    let mut params = base.params.clone();
+    params.push(Value::BigInt(max_batch_id));
+    let mut stmt = conn.prepare(&format!(
+        "SELECT client_ip, epoch_us(MIN(timestamp_utc)), epoch_us(MAX(timestamp_utc)), COUNT(*) AS n FROM logs WHERE {} AND batch_id <= ? AND client_ip IS NOT NULL GROUP BY client_ip ORDER BY n DESC, client_ip",
+        base.where_sql
+    ))?;
+    let mut rows = stmt.query(params_from_iter(params))?;
+    out.write_all(b"ip,first_seen_utc,last_seen_utc,count\n")
+        .map_err(|e| EngineError::Query(format!("CSV 쓰기 실패: {e}")))?;
+    let mut written = 0u64;
+    while let Some(r) = rows.next()? {
+        let ip: String = r.get(0)?;
+        let first: Option<i64> = r.get(1)?;
+        let last: Option<i64> = r.get(2)?;
+        let count: i64 = r.get(3)?;
+        let mut line = String::with_capacity(64);
+        csv_field(&mut line, &ip);
+        line.push(',');
+        line.push_str(&iso_utc(first));
+        line.push(',');
+        line.push_str(&iso_utc(last));
+        line.push(',');
+        line.push_str(&count.to_string());
+        line.push('\n');
+        out.write_all(line.as_bytes())
+            .map_err(|e| EngineError::Query(format!("CSV 쓰기 실패: {e}")))?;
+        written += 1;
+    }
+    Ok(written)
 }
 
 #[cfg(test)]
@@ -541,5 +585,52 @@ mod tests {
             r.top_messages.is_empty(),
             "접근 로그 조건이면 메시지 집계는 없다"
         );
+    }
+
+    #[test]
+    fn ip_csv_export_writes_every_ip_not_only_the_top_n() {
+        let (store, _) = seeded();
+        let top = compute_stats(
+            &store,
+            &StatsRequest {
+                filter: LogFilter::default(),
+                top_n: 1,
+                bucket: TimeBucket::Auto,
+                tz_offset_seconds: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(top.ip_rows.len(), 1, "화면 표는 상위 N만 본다");
+
+        let mut out = Vec::new();
+        let written = export_ip_stats(&store, &LogFilter::default(), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(written, 3, "IP 3개 전부");
+        assert_eq!(lines[0], "ip,first_seen_utc,last_seen_utc,count");
+        assert_eq!(lines.len(), 4);
+        assert!(
+            lines[1].starts_with("10.0.0.0,1970-01-01T00:00:00"),
+            "{}",
+            lines[1]
+        );
+        assert!(lines[1].ends_with(",34"), "{}", lines[1]);
+
+        let sum = |csv: &str| -> i64 {
+            csv.lines()
+                .skip(1)
+                .filter_map(|l| l.rsplit(',').next().and_then(|n| n.parse::<i64>().ok()))
+                .sum()
+        };
+        assert_eq!(sum(&text), 100, "조건이 없으면 전체 행이 잡힌다");
+
+        let only_500 = LogFilter {
+            status: Some(500),
+            ..LogFilter::default()
+        };
+        let mut narrow = Vec::new();
+        export_ip_stats(&store, &only_500, &mut narrow).unwrap();
+        let narrow = String::from_utf8(narrow).unwrap();
+        assert_eq!(sum(&narrow), 5, "조건이 좁으면 건수도 준다: {narrow}");
     }
 }

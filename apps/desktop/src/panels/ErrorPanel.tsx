@@ -9,7 +9,7 @@ import { DetailPanel } from "./DetailPanel";
 import { ROW_HEIGHT, useLogRows } from "./useLogRows";
 
 export function ErrorPanel() {
-  const { project, ruleRequest, appliedRange } = useAppState();
+  const { project, ruleRequest, scope } = useAppState();
   const [form, setForm] = useState<ErrorForm>(emptyErrorForm);
   const [sort, setSort] = useState<SortOrder>("time_asc");
   const { rows, cache, loading, applied, selected, setSelected, scrollRef, virtualizer, items, applyFilter, toggleBookmark } = useLogRows();
@@ -19,9 +19,9 @@ export function ErrorPanel() {
 
   // 사이드바에서 룰이나 기간을 바꾸면 화면의 검색은 유지한 채 바로 조회한다.
   useEffect(() => {
-    if (project) applyFilter(composeErrorFilter(base, form, appliedRange), sort);
+    if (project) applyFilter(composeErrorFilter(base, form, scope), sort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ruleRequest?.nonce, appliedRange.nonce, project]);
+  }, [ruleRequest?.nonce, scope.nonce, project]);
 
   if (!project) {
     return (
@@ -38,7 +38,7 @@ export function ErrorPanel() {
         className="filter-bar"
         onSubmit={(e) => {
           e.preventDefault();
-          applyFilter(composeErrorFilter(base, form, appliedRange), sort);
+          applyFilter(composeErrorFilter(base, form, scope), sort);
         }}
       >
         <label className="f f-search">
@@ -54,6 +54,18 @@ export function ErrorPanel() {
         </label>
         <button type="submit" className="primary f-submit" disabled={loading}>
           조회
+        </button>
+        <button
+          type="button"
+          className="f-submit"
+          disabled={loading || form.q === ""}
+          title="검색어를 지우고 다시 조회합니다(룰·기간은 그대로)"
+          onClick={() => {
+            setForm(emptyErrorForm);
+            applyFilter(composeErrorFilter(base, emptyErrorForm, scope), sort);
+          }}
+        >
+          초기화
         </button>
       </form>
 

@@ -1,7 +1,8 @@
 // 앱 전역 상태: 열린 프로젝트, 진행 중 가져오기, 단계 선택. 단순한 컨텍스트로 둔다.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, errorText } from "./api";
-import { emptyRange, openRange, type RangeMicros, type TimeRange } from "./lib/timeRange";
+import { openScope, type Scope } from "./lib/scope";
+import { emptyRange, type RangeMicros, type TimeRange } from "./lib/timeRange";
 import type { ExportFinishedView, ExportProgressView, FormatProfile, ImportFinishedView, ImportProgressView, LogFilter, LogKind, ProjectInfo, ScanResponse, ScannedFile, ServerHint, StartImportRequest } from "./types";
 
 /** 화면 흐름: 시작(폴더·포맷 확인) → 파싱 중 → 결과. */
@@ -69,9 +70,11 @@ interface AppState {
   /** 기간 입력. 룰보다 상위 조건이라 모든 탭·로그 종류에서 함께 걸린다. */
   range: TimeRange;
   setRange: (r: TimeRange) => void;
-  /** 적용된 기간. nonce가 바뀌면 열려 있는 탭이 다시 조회·집계한다. */
-  appliedRange: RangeMicros & { nonce: number };
+  /** 적용된 조회 범위(기간 + 화이트리스트 IP). nonce가 바뀌면 열려 있는 탭이 다시 조회·집계한다. */
+  scope: Scope & { nonce: number };
   applyRange: (r: RangeMicros) => void;
+  /** 결과에서 뺄 IP 목록을 바꾼다. 바꾸는 즉시 다시 조회한다. */
+  applyWhitelist: (ips: string[]) => void;
   /** 조회 화면이 마지막으로 적용한 조건. 사용자 룰로 저장할 때 쓴다. */
   currentFilter: LogFilter | null;
   setCurrentFilter: (f: LogFilter | null) => void;
@@ -102,8 +105,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [currentFilter, setCurrentFilter] = useState<LogFilter | null>(null);
   const applyRule = useCallback((name: string, filter: LogFilter) => setRuleRequest((prev) => ({ name, filter, nonce: (prev?.nonce ?? 0) + 1 })), []);
   const [range, setRange] = useState<TimeRange>(emptyRange);
-  const [appliedRange, setAppliedRange] = useState<RangeMicros & { nonce: number }>({ ...openRange, nonce: 0 });
-  const applyRange = useCallback((r: RangeMicros) => setAppliedRange((prev) => ({ ...r, nonce: prev.nonce + 1 })), []);
+  const [scope, setScope] = useState<Scope & { nonce: number }>({ ...openScope, nonce: 0 });
+  const applyRange = useCallback((r: RangeMicros) => setScope((prev) => ({ ...prev, ...r, nonce: prev.nonce + 1 })), []);
+  const applyWhitelist = useCallback((ips: string[]) => setScope((prev) => ({ ...prev, ips, nonce: prev.nonce + 1 })), []);
   const pollRef = useRef<number | null>(null);
 
   const refreshProject = useCallback(async () => {
@@ -256,12 +260,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       applyRule,
       range,
       setRange,
-      appliedRange,
+      scope,
       applyRange,
+      applyWhitelist,
       currentFilter,
       setCurrentFilter,
     }),
-    [stage, logKind, selections, project, refreshProject, openProject, createCase, progress, finished, startImports, importRun, exportProgress, exportFinished, selection, setSelection, notice, ruleRequest, applyRule, range, appliedRange, applyRange, currentFilter],
+    [stage, logKind, selections, project, refreshProject, openProject, createCase, progress, finished, startImports, importRun, exportProgress, exportFinished, selection, setSelection, notice, ruleRequest, applyRule, range, scope, applyRange, applyWhitelist, currentFilter],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

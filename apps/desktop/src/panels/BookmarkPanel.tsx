@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import { useAppState } from "../state";
 import { formatCount, formatTime } from "../lib/format";
 import { rowSummary } from "../lib/rowSummary";
-import { withRange } from "../lib/timeRange";
+import { applyScope } from "../lib/scope";
 import { emptyFilter, type LogFilter, type SortOrder } from "../types";
 import { DetailPanel } from "./DetailPanel";
 import { ROW_HEIGHT, useLogRows } from "./useLogRows";
 
 export function BookmarkPanel() {
-  const { project, ruleRequest, appliedRange } = useAppState();
+  const { project, ruleRequest, scope } = useAppState();
   const [sort, setSort] = useState<SortOrder>("time_asc");
   const { rows, cache, loading, applied, selected, setSelected, scrollRef, virtualizer, items, applyFilter, toggleBookmark } = useLogRows();
 
@@ -18,9 +18,9 @@ export function BookmarkPanel() {
   const base: LogFilter = { ...(ruleRequest?.filter ?? emptyFilter()), bookmarked_only: true, log_kind: null };
 
   useEffect(() => {
-    if (project) applyFilter(withRange(base, appliedRange), sort);
+    if (project) applyFilter(applyScope(base, scope), sort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ruleRequest?.nonce, appliedRange.nonce, project, sort]);
+  }, [ruleRequest?.nonce, scope.nonce, project, sort]);
 
   if (!project) {
     return (

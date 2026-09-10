@@ -402,6 +402,27 @@ class Parser {
     return { kind: "cond", field, op: def.nocase ? "icontains" : "contains", value: def.value };
   }
 
+  /** `필드 in ("a", "b")` / `필드 in (404, 500)`. 같은 필드의 eq를 OR로 묶는다. */
+  private valueList(field: CondField, numeric: boolean, at: Tok): FilterExpr {
+    this.expectOp("(");
+    const items: FilterExpr[] = [];
+    while (!this.isOp(")")) {
+      const v = this.next();
+      if (numeric) {
+        if (v.t !== "num") this.fail(v, `${fieldName(field)} 목록에는 따옴표 없는 숫자를 씁니다`);
+        items.push({ kind: "cond", field, op: "eq", value: String(v.v) });
+      } else {
+        if (v.t !== "str") this.fail(v, `${fieldName(field)} 목록의 값은 따옴표로 감쌉니다`);
+        items.push({ kind: "cond", field, op: "eq", value: v.v });
+      }
+      if (this.isOp(",")) this.next();
+      else break;
+    }
+    this.expectOp(")");
+    if (items.length === 0) this.fail(at, "목록에는 값을 하나 이상 넣어야 합니다");
+    return items.length === 1 ? items[0] : { kind: "or", items };
+  }
+
   private fieldTerm(field: CondField, at: Tok): FilterExpr {
     const t = this.next();
     const numeric = NUMERIC.has(field);
@@ -424,7 +445,9 @@ class Parser {
     if (t.t === "ident") {
       const w = t.v.toLowerCase();
       if (w === "in") {
-        if (!numeric) this.fail(t, "in a..b는 숫자 필드에만 쓸 수 있습니다");
+        // 목록: 같은 필드에 값 여러 개. 값이 둘 이상인 IP·상태코드를 한 줄로 쓴다.
+        if (this.isOp("(")) return this.valueList(field, numeric, t);
+        if (!numeric) this.fail(t, '문자열 필드는 in ("값", "값") 목록만 쓸 수 있습니다(숫자 필드만 a..b 범위)');
         const a = this.next();
         this.expectOp("..");
         const b = this.next();

@@ -58,6 +58,8 @@ export const api = {
   countLogs: (filter: LogFilter) => invoke<number>("count_logs", { filter }),
   logDetail: (job_id: number | null, source_id: number, line_number: number) =>
     invoke<DetailView | null>("log_detail", { job_id, source_id, line_number }),
+  /** 조건에 맞는 클라이언트 IP 집계 전체를 CSV로 저장한다. 반환값은 쓴 줄 수. */
+  exportIpStats: (out_path: string, filter: LogFilter) => invoke<number>("export_ip_stats", { out_path, filter }),
   computeStats: (request: StatsRequest) => invoke<StatsResult>("compute_stats", { request }),
   cancelHeavy: () => invoke<void>("cancel_heavy"),
   listViews: () => invoke<SavedView[]>("list_views"),

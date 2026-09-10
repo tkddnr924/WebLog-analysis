@@ -128,7 +128,7 @@ describe("parseRule", () => {
     expect(items).toContainEqual(cond("message", "icontains", "PHP message"));
     expect(items).toContainEqual(cond("level", "regex", "(?i)crit|alert|emerg"));
     expect(bad(`rule e { condition: level > 3 }`)).toMatch(/==, != 만/);
-    expect(bad(`rule e { condition: message in 1..2 }`)).toMatch(/숫자 필드에만/);
+    expect(bad(`rule e { condition: message in 1..2 }`)).toMatch(/목록만 쓸 수 있습니다/);
   });
 
   it("puts bare signatures on the given default field", () => {
@@ -142,6 +142,30 @@ describe("parseRule", () => {
   it("describes the error fields in Korean", () => {
     expect(describeExpr(cond("level", "eq", "error"))).toBe("레벨 = error");
     expect(describeExpr(cond("message", "icontains", "PHP"))).toBe("메시지 포함(대소문자 무시) PHP");
+  });
+
+  it("matches a list of values with one condition", () => {
+    const r = ok(`rule ips { condition: ip in ("10.0.0.1", "10.0.0.2", "203.0.113.7") }`);
+    expect(r.expr).toEqual({
+      kind: "or",
+      items: [cond("client_ip", "eq", "10.0.0.1"), cond("client_ip", "eq", "10.0.0.2"), cond("client_ip", "eq", "203.0.113.7")],
+    });
+    const s = ok(`rule st { condition: status in (404, 500) }`);
+    expect(s.expr).toEqual({ kind: "or", items: [cond("status", "eq", "404"), cond("status", "eq", "500")] });
+  });
+
+  it("keeps the numeric range form and rejects broken lists", () => {
+    const r = ok(`rule r { condition: status in 400..499 }`);
+    expect(r.expr).toEqual({ kind: "and", items: [cond("status", "gte", "400"), cond("status", "lte", "499")] });
+    expect(bad(`rule e { condition: ip in () }`)).toContain("값을 하나 이상");
+    expect(bad(`rule e { condition: status in ("404") }`)).toContain("숫자");
+    expect(bad(`rule e { condition: ip in (10) }`)).toContain("따옴표");
+    expect(bad(`rule e { condition: ip in 1..2 }`)).toContain("숫자 필드");
+  });
+
+  it("describes a list as a single line", () => {
+    const r = ok(`rule ips { condition: ip in ("10.0.0.1", "10.0.0.2") }`);
+    expect(describeExpr(r.expr)).toBe("(IP = 10.0.0.1 또는 IP = 10.0.0.2)");
   });
 
   it("describes expressions in Korean", () => {

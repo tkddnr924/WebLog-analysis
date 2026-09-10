@@ -26,6 +26,8 @@ export function RuleEditor({
   initial,
   title,
   onCancel,
+  /** 사용자 룰을 열었을 때만 온다. 누르면 확인 후 지운다. */
+  onDelete,
   onSave,
 }: {
   /** 편집 중인 룰이 어느 로그 종류의 것인지. 기본 필드·예시·일치 건수가 달라진다. */
@@ -33,6 +35,7 @@ export function RuleEditor({
   initial: string | null;
   title: string;
   onCancel: () => void;
+  onDelete?: () => Promise<void>;
   onSave: (rule: ParsedRule, source: string) => Promise<void>;
 }) {
   const { project } = useAppState();
@@ -400,6 +403,12 @@ export function RuleEditor({
           </aside>
         </div>
         <div className="dialog-actions">
+          {onDelete && (
+            <button type="button" className="danger" onClick={() => void onDelete()} disabled={busy}>
+              룰 삭제
+            </button>
+          )}
+          <span className="grow" />
           <button type="button" onClick={onCancel} disabled={busy}>
             취소
           </button>
@@ -470,6 +479,7 @@ const OP_SNIPS: Snip[] = [
   { label: ">=", text: ">= 500" },
   { label: "<", text: "< 100" },
   { label: "in a..b", text: "in 400..499", hint: "숫자 범위(양 끝 포함)" },
+  { label: "in (…)", text: 'in ("10.0.0.1", "10.0.0.2")', hint: "값 여러 개 중 하나(IP·메서드 등). 숫자 필드는 in (404, 500)" },
   {
     label: "contains",
     text: 'contains "…"',
@@ -595,10 +605,12 @@ const HELP = `rule 식별자 {
     any of them            정의한 문자열 중 하나라도
     all of ($a*)           이름이 a로 시작하는 문자열 모두
     status == 404          == != > >= < <=
-    status in 500..599     범위
+    status in 500..599     범위(숫자 필드)
+    status in (404, 500)   목록 — 값이 여럿이면 이렇게 한 줄로
+    ip in ("10.0.0.1", "10.0.0.2", "203.0.113.7")
     bytes > 100000
     method == "POST"
-    ip == "10.0.0.1"
+    ip == "10.0.0.1"       값이 하나일 때
     path startswith "/api"   endswith, contains, icontains, matches
     referrer is null       is not null
     level matches /crit/i  에러 로그 레벨

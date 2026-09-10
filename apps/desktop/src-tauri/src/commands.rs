@@ -257,6 +257,23 @@ pub async fn compute_stats(
     blocking(move || s.stats(&request)).await
 }
 
+/// 조건에 맞는 클라이언트 IP 집계 전체를 CSV로 저장한다. 화면 표와 달리 상위 N 제한이 없다.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn export_ip_stats(
+    state: ServiceState<'_>,
+    out_path: String,
+    filter: LogFilter,
+) -> ServiceResult<u64> {
+    let s = owned(&state);
+    applog::info(&format!("IP 통계 내보내기 시작 path={out_path}"));
+    let result = blocking(move || s.export_ip_stats(&PathBuf::from(out_path), &filter)).await;
+    match &result {
+        Ok(n) => applog::info(&format!("IP 통계 내보내기 완료 rows={n}")),
+        Err(e) => applog::error(&format!("IP 통계 내보내기 실패: {e}")),
+    }
+    result
+}
+
 /// 실행 중인 건수·통계 조회를 중단한다.
 #[tauri::command(rename_all = "snake_case")]
 pub fn cancel_heavy(state: ServiceState<'_>) {

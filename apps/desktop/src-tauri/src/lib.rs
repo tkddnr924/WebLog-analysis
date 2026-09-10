@@ -86,6 +86,7 @@ pub fn run() {
             commands::start_import,
             commands::cancel_import,
             commands::import_status,
+            commands::export_ip_stats,
             commands::query_page,
             commands::count_logs,
             commands::log_detail,

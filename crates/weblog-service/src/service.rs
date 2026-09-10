@@ -1,5 +1,7 @@
 //! 서비스 본체.
 
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,7 +16,7 @@ use weblog_engine::importer::{
 use weblog_engine::preview::{preview_file, PreviewConfig, PreviewResult};
 use weblog_engine::reconstruct;
 use weblog_engine::source::{scan_directory, LineContent, LineReader, ScanOptions};
-use weblog_engine::store::stats::compute_stats;
+use weblog_engine::store::stats::{compute_stats, export_ip_stats};
 use weblog_engine::store::{
     JobInfo, LogFilter, LogPage, LogQuery, PageRequest, SavedView, SourceVerification,
     StatsRequest, StatsResult, Store, StoreConfig, ViewDefinition, ViewQuery,
@@ -884,6 +886,20 @@ impl Service {
     /// 기본 통계. 무거운 조회.
     pub fn stats(&self, req: &StatsRequest) -> ServiceResult<StatsResult> {
         self.heavy(|r| Ok(compute_stats(r, req)?))
+    }
+
+    /// 조건에 맞는 클라이언트 IP 집계 전체를 CSV 파일로 쓴다(화면 표의 상위 N 제한 없음). 반환값은 쓴 줄 수.
+    pub fn export_ip_stats(&self, out_path: &Path, filter: &LogFilter) -> ServiceResult<u64> {
+        if out_path.as_os_str().is_empty() {
+            return Err(ServiceError::Invalid("저장 경로가 비었음".to_owned()));
+        }
+        let file = File::create(out_path)
+            .map_err(|e| ServiceError::Invalid(format!("파일을 만들 수 없음: {e}")))?;
+        let mut w = BufWriter::new(file);
+        let written = self.heavy(|r| Ok(export_ip_stats(r, filter, &mut w)?))?;
+        w.flush()
+            .map_err(|e| ServiceError::Invalid(format!("파일 쓰기 실패: {e}")))?;
+        Ok(written)
     }
 
     // ----- 저장된 뷰 -----

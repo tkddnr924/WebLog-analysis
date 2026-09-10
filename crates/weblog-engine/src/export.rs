@@ -91,14 +91,14 @@ const HEADER: &[&str] = &[
     "line_number",
 ];
 
-fn iso_utc(micros: Option<i64>) -> String {
+pub(crate) fn iso_utc(micros: Option<i64>) -> String {
     micros
         .and_then(chrono::DateTime::from_timestamp_micros)
         .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
         .unwrap_or_default()
 }
 
-fn csv_field(out: &mut String, v: &str) {
+pub(crate) fn csv_field(out: &mut String, v: &str) {
     if v.contains([',', '"', '\n', '\r']) {
         out.push('"');
         out.push_str(&v.replace('"', "\"\""));

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppState } from "../state";
 import { formatCount, formatTime, statusClass } from "../lib/format";
-import { withRange, type RangeMicros } from "../lib/timeRange";
+import { applyScope, type Scope } from "../lib/scope";
 import { emptyFilter, type FilterExpr, type LogFilter, type SortOrder } from "../types";
 import { DetailPanel } from "./DetailPanel";
 import { ROW_HEIGHT, useLogRows } from "./useLogRows";
@@ -28,14 +28,14 @@ export function quickSearchExpr(q: string): FilterExpr | null {
 }
 
 /** 룰 조건 위에 사이드바의 기간과 화면의 검색을 얹는다. */
-export function composeFilter(base: LogFilter, f: Form, range: RangeMicros): LogFilter {
+export function composeFilter(base: LogFilter, f: Form, scope: Scope): LogFilter {
   const quick = quickSearchExpr(f.q);
   const expr: FilterExpr | null = quick ? (base.expr ? { kind: "and", items: [base.expr, quick] } : quick) : base.expr;
-  return withRange({ ...base, expr }, range);
+  return applyScope({ ...base, expr }, scope);
 }
 
 export function QueryPanel() {
-  const { project, ruleRequest, setCurrentFilter, appliedRange } = useAppState();
+  const { project, ruleRequest, setCurrentFilter, scope } = useAppState();
   const [form, setForm] = useState<Form>(emptyForm);
   const [sort, setSort] = useState<SortOrder>("time_asc");
   const { rows, cache, loading, applied, selected, setSelected, scrollRef, virtualizer, items, applyFilter, toggleBookmark } = useLogRows();
@@ -56,9 +56,9 @@ export function QueryPanel() {
   // 사이드바에서 룰이나 기간을 바꾸면 화면의 검색은 유지한 채 바로 조회한다.
   useEffect(() => {
     if (!project) return;
-    applyAndRemember(composeFilter(base, form, appliedRange), sort);
+    applyAndRemember(composeFilter(base, form, scope), sort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ruleRequest?.nonce, appliedRange.nonce, project]);
+  }, [ruleRequest?.nonce, scope.nonce, project]);
 
   if (!project) {
     return (
@@ -75,7 +75,7 @@ export function QueryPanel() {
         className="filter-bar"
         onSubmit={(e) => {
           e.preventDefault();
-          applyAndRemember(composeFilter(base, form, appliedRange), sort);
+          applyAndRemember(composeFilter(base, form, scope), sort);
         }}
       >
         <label className="f f-search">
@@ -91,6 +91,18 @@ export function QueryPanel() {
         </label>
         <button type="submit" className="primary f-submit" disabled={loading}>
           조회
+        </button>
+        <button
+          type="button"
+          className="f-submit"
+          disabled={loading || form.q === ""}
+          title="검색어를 지우고 다시 조회합니다(룰·기간은 그대로)"
+          onClick={() => {
+            setForm(emptyForm);
+            applyAndRemember(composeFilter(base, emptyForm, scope), sort);
+          }}
+        >
+          초기화
         </button>
       </form>
 
