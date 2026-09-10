@@ -600,7 +600,7 @@ function matchNote(p: PreviewResult): string {
 function RolePill({ def, dragData, effect }: { def: RoleDef; dragData: string; effect: "copy" | "move" }) {
   return (
     <span
-      className={`pill kind-${def.kind}`}
+      className={`pill kind-${def.kind} grp-${def.group}`}
       draggable
       title={def.hint}
       onDragStart={(e) => {
@@ -648,11 +648,14 @@ function Puzzle({
           const absorbed = restAt !== null && i > restAt;
           const def = absorbed ? (roleDef(vocab, roles[restAt].role) ?? UNKNOWN_DEF) : (roleDef(vocab, roles[i]?.role ?? "ignore") ?? UNKNOWN_DEF);
           const tail = tails.get(i);
+          // `client:`와 그 값은 한 항목이므로 배경을 이어 붙인다. 떨어져 있으면 다른 값처럼 읽힌다.
+          const cont = tail?.label === "";
+          const runEnd = tail !== undefined && tails.get(i + 1)?.label !== "";
           return (
             <span
               key={i}
               role="listitem"
-              className={`chunk kind-${tail ? tail.kind : def.kind} ${absorbed ? "absorbed" : ""} ${tail?.label ? "tail-key" : ""} ${over === i ? "over" : ""}`}
+              className={`chunk kind-${tail ? tail.kind : def.kind} ${absorbed ? "absorbed" : `grp-${def.group}`} ${tail?.label ? "tail-key" : ""} ${cont ? "tail-cont" : ""} ${runEnd ? "run-end" : ""} ${over === i ? "over" : ""}`}
               draggable
               title={def.hint}
               onDragStart={(e) => {

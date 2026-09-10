@@ -17,6 +17,8 @@ export interface Rule {
   error?: string;
   /** 원문이 없거나 깨진 옛 저장 뷰의 조건 객체. */
   legacyFilter?: LogFilter;
+  /** 로그 종류를 가리지 않는 룰(북마크). 조회 조건에 log_kind를 얹지 않는다. */
+  shared?: boolean;
 }
 
 /** 기본 룰 원문. 편집기의 예시이기도 하다. 서명은 RE2(DuckDB)와 JS 정규식 양쪽에서 같은 뜻이어야 한다. */
@@ -339,6 +341,7 @@ export const BOOKMARK_RULE: Rule = {
   expr: { kind: "true" },
   builtin: true,
   legacyFilter: { ...emptyFilter(), bookmarked_only: true },
+  shared: true,
 };
 
 export const BUILTIN_RULES: Rule[] = [BOOKMARK_RULE, ...BUILTIN_SOURCES.map((s) => compileBuiltin(s, "access"))];
@@ -357,8 +360,10 @@ export function rulesFor(kind: LogKind, views: SavedView[]): Rule[] {
 
 /** 룰을 실제 조회 조건으로. 시간·활성 같은 화면 조건은 base로 얹는다. */
 export function ruleFilter(rule: Rule, base: Partial<LogFilter> = {}): LogFilter {
-  if (rule.legacyFilter) return { ...rule.legacyFilter, ...base };
-  return { ...emptyFilter(), ...base, expr: rule.expr };
+  // 북마크는 접근·에러가 같은 표를 쓰므로 화면 종류를 조건에 넣지 않는다.
+  const scoped = rule.shared ? { ...base, log_kind: null } : base;
+  if (rule.legacyFilter) return { ...rule.legacyFilter, ...scoped };
+  return { ...emptyFilter(), ...scoped, expr: rule.expr };
 }
 
 /** 저장된 뷰를 사용자 룰로. 원문이 있으면 다시 파싱하고, 없거나 깨졌으면 저장된 조건 객체를 쓴다. */

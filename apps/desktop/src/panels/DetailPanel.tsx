@@ -73,12 +73,14 @@ export function DetailPanel({ row, jobId, onClose, onToggleBookmark }: { row: Lo
               · {row.line_number.toLocaleString("ko-KR")}번째 줄
             </span>
           </div>
-          <button type="button" className={`star big ${row.bookmarked ? "on" : ""}`} onClick={onToggleBookmark} aria-pressed={row.bookmarked} title={row.bookmarked ? "북마크 해제" : "북마크"}>
-            {row.bookmarked ? "★" : "☆"}
-          </button>
-          <button className="linklike" onClick={onClose}>
-            닫기
-          </button>
+          <div className="detail-actions">
+            <button type="button" className={`star star-lg boxed ${row.bookmarked ? "on" : ""}`} onClick={onToggleBookmark} aria-pressed={row.bookmarked} title={row.bookmarked ? "북마크 해제" : "북마크"}>
+              {row.bookmarked ? "★" : "☆"}
+            </button>
+            <button type="button" className="icon close" onClick={onClose} title="닫기" aria-label="닫기">
+              ✕
+            </button>
+          </div>
         </div>
         {error && <div className="notice inline">{error}</div>}
         {view && d && (

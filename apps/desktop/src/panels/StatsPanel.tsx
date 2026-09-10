@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { useAppState } from "../state";
-import { DISPLAY_OFFSET_SECONDS, formatCount, formatTime, parseTimeInput } from "../lib/format";
+import { DISPLAY_OFFSET_SECONDS, formatCount, formatTime } from "../lib/format";
 import { emptyFilter, type StatsResult } from "../types";
 
 /** 시간축 막대 그래프. 단일 계열이라 색 하나만 쓰고, 값은 호버 툴팁과 표로 읽는다. */
@@ -87,9 +87,7 @@ export function Bars({ title, rows, unit }: { title: string; rows: [string, numb
 }
 
 export function StatsPanel() {
-  const { project, setNotice, ruleRequest } = useAppState();
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const { project, setNotice, ruleRequest, appliedRange } = useAppState();
   const [activeOnly, setActiveOnly] = useState(true);
   const [topN, setTopN] = useState(20);
   const [stats, setStats] = useState<StatsResult | null>(null);
@@ -98,12 +96,6 @@ export function StatsPanel() {
   const requestRef = useRef(0);
 
   const run = useCallback(async () => {
-    const f = parseTimeInput(from);
-    const t = parseTimeInput(to);
-    if (f === undefined || t === undefined) {
-      setNotice("시각은 YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM 형식(한국 시간)으로 입력하세요.");
-      return;
-    }
     requestRef.current += 1;
     const id = requestRef.current;
     setLoading(true);
@@ -112,8 +104,8 @@ export function StatsPanel() {
         // 사이드바 접근 룰의 조건(상태·메서드·IP·경로) 위에 이 화면의 시간·작업·활성 조건을 얹는다. 집계는 접근 로그만 본다.
         filter: {
           ...(ruleRequest?.filter.log_kind === "access" ? ruleRequest.filter : emptyFilter()),
-          time_from_micros: f,
-          time_to_micros: t,
+          time_from_micros: appliedRange.from,
+          time_to_micros: appliedRange.to,
           active_only: activeOnly,
           log_kind: "access",
         },
@@ -131,13 +123,13 @@ export function StatsPanel() {
       if (id === requestRef.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, activeOnly, topN, ruleRequest?.nonce, setNotice]);
+  }, [appliedRange, activeOnly, topN, ruleRequest?.nonce, setNotice]);
 
   // 룰을 고르거나 탭을 열면 바로 집계한다. 조건을 바꾼 뒤에는 "계산"으로 다시 돌린다.
   useEffect(() => {
     if (project) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.db_path, ruleRequest?.nonce]);
+  }, [project?.db_path, ruleRequest?.nonce, appliedRange.nonce]);
 
   const cancel = async () => {
     try {
@@ -165,15 +157,6 @@ export function StatsPanel() {
           void run();
         }}
       >
-        <label className="f f-time">
-          <span>시작</span>
-          <input value={from} onChange={(e) => setFrom(e.target.value)} placeholder="2026-09-01T00:00" spellCheck={false} />
-        </label>
-        <label className="f f-time">
-          <span>끝(제외)</span>
-          <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="2026-09-02T00:00" spellCheck={false} />
-        </label>
-        <span className="f-sep" aria-hidden="true" />
         <label className="f f-xs">
           <span>상위 N</span>
           <input type="number" min={1} max={100} value={topN} onChange={(e) => setTopN(Number(e.target.value))} />

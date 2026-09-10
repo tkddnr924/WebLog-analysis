@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppState } from "../state";
-import { formatCount, formatTime, parseTimeInput, statusClass } from "../lib/format";
+import { formatCount, formatTime, statusClass } from "../lib/format";
+import { withRange, type RangeMicros } from "../lib/timeRange";
 import { emptyFilter, type FilterExpr, type LogFilter, type SortOrder } from "../types";
 import { DetailPanel } from "./DetailPanel";
 import { ROW_HEIGHT, useLogRows } from "./useLogRows";
 
 interface Form {
-  from: string;
-  to: string;
   q: string;
 }
 
-const emptyForm: Form = { from: "", to: "", q: "" };
+const emptyForm: Form = { q: "" };
 
 /** 빠른 검색: 경로·IP·리퍼러·브라우저 중 하나라도 검색어를 포함(대소문자 무시). IP는 정확히 일치도 본다. */
 export function quickSearchExpr(q: string): FilterExpr | null {
@@ -28,18 +27,15 @@ export function quickSearchExpr(q: string): FilterExpr | null {
   };
 }
 
-/** 룰 조건 위에 화면의 기간·검색을 얹는다. 잘못된 시각이면 오류 문자열. */
-export function composeFilter(base: LogFilter, f: Form): LogFilter | string {
-  const from = parseTimeInput(f.from);
-  const to = parseTimeInput(f.to);
-  if (from === undefined || to === undefined) return "시각은 YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM 형식(한국 시간)으로 입력하세요.";
+/** 룰 조건 위에 사이드바의 기간과 화면의 검색을 얹는다. */
+export function composeFilter(base: LogFilter, f: Form, range: RangeMicros): LogFilter {
   const quick = quickSearchExpr(f.q);
   const expr: FilterExpr | null = quick ? (base.expr ? { kind: "and", items: [base.expr, quick] } : quick) : base.expr;
-  return { ...base, time_from_micros: from, time_to_micros: to, expr };
+  return withRange({ ...base, expr }, range);
 }
 
 export function QueryPanel() {
-  const { project, setNotice, ruleRequest, setCurrentFilter } = useAppState();
+  const { project, ruleRequest, setCurrentFilter, appliedRange } = useAppState();
   const [form, setForm] = useState<Form>(emptyForm);
   const [sort, setSort] = useState<SortOrder>("time_asc");
   const { rows, cache, loading, applied, selected, setSelected, scrollRef, virtualizer, items, applyFilter, toggleBookmark } = useLogRows();
@@ -57,22 +53,12 @@ export function QueryPanel() {
   const accessRule = ruleRequest?.filter.log_kind === "access" ? ruleRequest.filter : null;
   const base: LogFilter = { ...(accessRule ?? { ...emptyFilter(), active_only: true }), log_kind: "access" };
 
-  const apply = () => {
-    const f = composeFilter(base, form);
-    if (typeof f === "string") {
-      setNotice(f);
-      return;
-    }
-    applyAndRemember(f, sort);
-  };
-
-  // 사이드바에서 룰을 고르면 화면의 기간·검색은 유지한 채 바로 조회한다.
+  // 사이드바에서 룰이나 기간을 바꾸면 화면의 검색은 유지한 채 바로 조회한다.
   useEffect(() => {
-    if (!accessRule || !project) return;
-    const f = composeFilter({ ...accessRule, log_kind: "access" }, form);
-    if (typeof f !== "string") applyAndRemember(f, sort);
+    if (!project) return;
+    applyAndRemember(composeFilter(base, form, appliedRange), sort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ruleRequest?.nonce, project]);
+  }, [ruleRequest?.nonce, appliedRange.nonce, project]);
 
   if (!project) {
     return (
@@ -89,17 +75,9 @@ export function QueryPanel() {
         className="filter-bar"
         onSubmit={(e) => {
           e.preventDefault();
-          apply();
+          applyAndRemember(composeFilter(base, form, appliedRange), sort);
         }}
       >
-        <label className="f f-time">
-          <span>시작</span>
-          <input value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} placeholder="2026-09-01T00:00" spellCheck={false} />
-        </label>
-        <label className="f f-time">
-          <span>끝(제외)</span>
-          <input value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} placeholder="2026-09-02T00:00" spellCheck={false} />
-        </label>
         <label className="f f-search">
           <span>검색 (경로 · IP · 리퍼러 · 브라우저)</span>
           <input value={form.q} onChange={(e) => setForm({ ...form, q: e.target.value })} placeholder="예: /admin, 10.0.0.1, python" spellCheck={false} />

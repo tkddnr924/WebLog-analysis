@@ -2,6 +2,8 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { useAppState } from "../state";
+import { parseTimeInput } from "../lib/format";
+import { emptyRange, openRange, parseRange } from "../lib/timeRange";
 import { builtinRules, ruleFilter, rulesFor, type Rule } from "../lib/rules";
 import type { ParsedRule } from "../lib/yara";
 import type { LogKind, SavedView } from "../types";
@@ -95,6 +97,7 @@ export function RulesSidebar({ kind }: { kind: LogKind }) {
           −
         </button>
       </div>
+      <RangeBox />
       <div className="rules-list" role="listbox" aria-label="룰 목록">
         {builtins.map((r, i) => (
           <Fragment key={r.id}>
@@ -118,6 +121,55 @@ export function RulesSidebar({ kind }: { kind: LogKind }) {
         />
       )}
     </aside>
+  );
+}
+
+/**
+ * 기간 상자. 룰보다 상위 조건이라 사이드바에 두고, 조회·통계 어느 탭에서도 같은 구간만 보게 한다.
+ * 사고 시각이 특정됐을 때 탭을 오가도 구간이 풀리지 않는 것이 목적이다.
+ */
+function RangeBox() {
+  const { range, setRange, appliedRange, applyRange, setNotice } = useAppState();
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseRange(range);
+    if (typeof parsed === "string") {
+      setNotice(parsed);
+      return;
+    }
+    setNotice(null);
+    applyRange(parsed);
+  };
+  const clear = () => {
+    setRange(emptyRange);
+    setNotice(null);
+    applyRange(openRange);
+  };
+  const dirty = (parseTimeInput(range.from) ?? null) !== appliedRange.from || (parseTimeInput(range.to) ?? null) !== appliedRange.to;
+  const limited = appliedRange.from !== null || appliedRange.to !== null;
+  return (
+    <form className="range-box" onSubmit={submit}>
+      <div className="range-head">
+        <span>기간</span>
+        {limited && (
+          <button type="button" className="linklike" onClick={clear}>
+            해제
+          </button>
+        )}
+      </div>
+      <label className="range-field">
+        <span>시작</span>
+        <input value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} placeholder="2026-09-01T00:00" spellCheck={false} />
+      </label>
+      <label className="range-field">
+        <span>끝(제외)</span>
+        <input value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} placeholder="2026-09-02T00:00" spellCheck={false} />
+      </label>
+      <button type="submit" className={dirty ? "primary" : ""}>
+        기간 적용
+      </button>
+      <div className="range-note muted">{limited ? "이 기간 안에서만 룰이 적용됩니다." : "전체 기간을 봅니다."}</div>
+    </form>
   );
 }
 
