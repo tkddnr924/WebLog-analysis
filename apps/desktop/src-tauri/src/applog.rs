@@ -165,6 +165,24 @@ pub fn log_event(event: &ServiceEvent) {
     }
 }
 
+/// 화면 단계 로그의 최대 글자 수. 로그 원문이 흘러들어도 파일을 채우지 않게 자른다.
+const STEP_MAX_CHARS: usize = 200;
+
+/// 화면이 보낸 단계를 한 줄로 만든다. `UI` 표시를 붙이고 길이를 제한한다.
+pub fn step_message(step: &str) -> String {
+    let trimmed = step.trim();
+    if trimmed.chars().count() <= STEP_MAX_CHARS {
+        return format!("UI {trimmed}");
+    }
+    let cut: String = trimmed.chars().take(STEP_MAX_CHARS).collect();
+    format!("UI {cut}…")
+}
+
+/// 화면 단계 기록. 대화상자처럼 Rust 명령이 관여하지 않는 구간을 크래시 로그에 남긴다.
+pub fn step(step: &str) {
+    write("INFO", &step_message(step));
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -176,6 +194,18 @@ mod tests {
             format_line("2026-09-10 12:00:00", "INFO", "가져오기 시작 files=1"),
             "2026-09-10 12:00:00 [INFO] 가져오기 시작 files=1\n"
         );
+    }
+
+    #[test]
+    fn ui_steps_are_marked_and_capped() {
+        assert_eq!(step_message("폴더 선택 열기"), "UI 폴더 선택 열기");
+        let long = step_message(&"가".repeat(500));
+        assert!(
+            long.chars().count() <= STEP_MAX_CHARS + "UI …".chars().count(),
+            "긴 단계는 잘라 낸다: {}",
+            long.chars().count()
+        );
+        assert!(long.ends_with('…'), "잘렸음을 표시한다: {long}");
     }
 
     #[test]

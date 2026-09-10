@@ -67,6 +67,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_project,
+            commands::log_step,
             commands::create_case,
             commands::list_cases,
             commands::delete_case,

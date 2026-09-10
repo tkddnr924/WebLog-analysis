@@ -158,9 +158,13 @@ export function StartPanel() {
 
   const pickFolder = async () => {
     try {
+      // 대화상자는 Rust 명령을 거치지 않아 크래시하면 로그에 아무 흔적이 없다. 앞뒤로 단계를 남긴다.
+      void api.logStep("폴더 선택 대화상자 열기");
       const p = await open({ directory: true, multiple: false });
+      void api.logStep(typeof p === "string" && p ? "폴더 선택 완료" : "폴더 선택 취소");
       if (typeof p === "string" && p) await runScan(p, selection.server, includes);
     } catch (e) {
+      void api.logStep("폴더 선택 실패");
       setNotice(errorText(e));
     }
   };
@@ -339,6 +343,7 @@ export function StartPanel() {
       return;
     }
     setStarting(true);
+    void api.logStep("파싱 시작 버튼");
     try {
       // 파싱 한 번 = 케이스 하나. 열린 케이스가 있어도 새 파일을 만들어 같은 로그가 두 번 쌓이지 않게 한다.
       // 저장 위치는 묻지 않는다. 앱 데이터의 cases/ 아래에 폴더 이름과 시각으로 DB를 만든다.

@@ -32,6 +32,8 @@ import type {
 export const IMPORT_EVENT = "weblog://import";
 
 export const api = {
+  /** 크래시 추적용 단계 기록. 실패해도 화면 흐름을 막지 않는다. */
+  logStep: (step: string) => invoke<void>("log_step", { step }).catch(() => undefined),
   openProject: (db_path: string) => invoke<ProjectInfo>("open_project", { db_path }),
   createCase: (name_hint: string) => invoke<ProjectInfo>("create_case", { name_hint }),
   listCases: () => invoke<CaseInfo[]>("list_cases"),

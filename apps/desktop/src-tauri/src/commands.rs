@@ -30,6 +30,12 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| ServiceError::Invalid(format!("작업 스레드 오류: {e}")))?
 }
 
+/// 화면이 보낸 단계를 로그에 남긴다. 대화상자처럼 Rust가 관여하지 않는 구간의 크래시 위치를 좁힌다.
+#[tauri::command(rename_all = "snake_case")]
+pub fn log_step(step: String) {
+    applog::step(&step);
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn open_project(state: ServiceState<'_>, db_path: String) -> ServiceResult<ProjectInfo> {
     if db_path.trim().is_empty() {
@@ -42,6 +48,7 @@ pub async fn open_project(state: ServiceState<'_>, db_path: String) -> ServiceRe
 /// cases/ 아래에 새 케이스 DB를 만들어 연다. 이름 힌트는 파일 이름에만 쓴다.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn create_case(state: ServiceState<'_>, name_hint: String) -> ServiceResult<ProjectInfo> {
+    applog::info(&format!("케이스 생성 시작 name={name_hint}"));
     let s = owned(&state);
     let result = blocking(move || s.create_case(&name_hint)).await;
     match &result {
@@ -132,8 +139,15 @@ pub async fn scan_files(
     if request.root.as_os_str().is_empty() {
         return Err(ServiceError::Invalid("탐색 경로가 비었음".to_owned()));
     }
+    // 크래시 추적: 명령 안에서 죽어도 어디까지 갔는지 남는다.
+    applog::info(&format!("탐색 시작 root={}", request.root.display()));
     let s = owned(&state);
-    blocking(move || s.scan(&request)).await
+    let result = blocking(move || s.scan(&request)).await;
+    match &result {
+        Ok(r) => applog::info(&format!("탐색 완료 files={}", r.files.len())),
+        Err(e) => applog::error(&format!("탐색 실패: {e}")),
+    }
+    result
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -141,6 +155,7 @@ pub async fn preview_format(
     state: ServiceState<'_>,
     request: PreviewRequest,
 ) -> ServiceResult<PreviewResult> {
+    applog::info("미리보기 시작");
     let s = owned(&state);
     blocking(move || s.preview(&request)).await
 }
@@ -155,6 +170,7 @@ pub async fn sample_lines(
     if path.as_os_str().is_empty() {
         return Err(ServiceError::Invalid("파일 경로가 비었음".to_owned()));
     }
+    applog::info(&format!("샘플 읽기 시작 path={}", path.display()));
     let s = owned(&state);
     blocking(move || s.sample_lines(&path, max_lines)).await
 }

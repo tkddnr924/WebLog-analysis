@@ -54,6 +54,16 @@ jobs:
           cp target/release/weblog-desktop.exe out/Weblog-analysis.exe
           ls -la out
 
+      # 정적 CRT 확인: MSVCP140.dll을 참조하면 사용자 PC의 재배포 패키지 버전에 따라 죽을 수 있다.
+      - name: Check no MSVC runtime dependency
+        shell: bash
+        run: |
+          if grep -a -q -E "MSVCP140|VCRUNTIME140" out/Weblog-analysis.exe; then
+            echo "MSVC 런타임 DLL을 동적으로 참조한다. crt-static 설정을 확인하라." >&2
+            exit 1
+          fi
+          echo "MSVC 런타임 정적 링크 확인"
+
       - uses: actions/upload-artifact@v4
         with:
           name: Weblog-analysis-windows-x64
