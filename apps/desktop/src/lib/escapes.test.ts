@@ -30,4 +30,14 @@ describe("escapes", () => {
     expect(describeBinary(Array.from(new TextEncoder().encode("/index.html")))).toBeNull();
     expect(parseSni([0x16, 0x03, 0x01])).toBeNull();
   });
+
+  it("줄 길이 상한(64KiB)만큼 긴 요청 대상도 예외 없이 디코드한다", () => {
+    // Worst case: one escape followed by an unbroken 64KiB plain run (largest single batch of elements).
+    const plain = "a".repeat(65_536);
+    const r = decodeHexEscapes(`${esc([0x16])}${plain}`);
+    expect(r.bytes.length).toBe(1 + plain.length);
+    expect(r.text.length).toBe(1 + plain.length);
+    expect(r.text.startsWith("·aaa")).toBe(true);
+    expect(printable(r.bytes).length).toBe(1 + plain.length);
+  });
 });

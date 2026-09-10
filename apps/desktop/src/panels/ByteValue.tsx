@@ -1,7 +1,7 @@
-// 바이트 값. 기본은 정확한 바이트 수이고, 옆의 단위 버튼을 누르면 B → KB → MB → GB → TB로 바꿔 본다(1024 기준).
+// Byte value. Shows exact bytes by default; the unit button cycles B → KiB → MiB → GiB → TiB (1024 based, same labels as formatBytes).
 import { useState } from "react";
 
-const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
+const UNITS = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
 type Unit = (typeof UNITS)[number];
 const KEY = "weblog.byteUnit";
 

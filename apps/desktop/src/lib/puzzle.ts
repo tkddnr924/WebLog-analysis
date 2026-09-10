@@ -16,15 +16,6 @@ export type Role = string;
 
 export type RoleGroup = "client" | "time" | "request" | "response" | "server" | "misc";
 
-export const GROUP_LABELS: Record<RoleGroup, string> = {
-  client: "클라이언트",
-  time: "시간",
-  request: "요청",
-  response: "응답",
-  server: "서버·업스트림",
-  misc: "기타",
-};
-
 export interface RoleDef {
   id: Role;
   /** 조각 위에 보이는 라벨(변수명 또는 지시자). */
@@ -319,15 +310,6 @@ export function roleForKind(vocab: RoleDef[], kind: FieldKind, name?: string): R
   if (kind.kind === "text" || kind.kind === "integer") return kind.kind;
   return same[0]?.id ?? "text";
 }
-
-/** 내장 프리셋 이름의 설명. 이름만으로는 뜻을 알기 어렵다. */
-export const PRESET_LABELS: Record<string, string> = {
-  common: "Apache/Nginx 기본(common): IP · 시간 · 요청 · 상태 · 바이트",
-  combined: "Apache/Nginx 확장(combined): 기본 + 리퍼러 · UA",
-  apache_combined: "Apache combined",
-  nginx_combined: "Nginx combined",
-  iis_w3c: "IIS W3C (#Fields 헤더 기반)",
-};
 
 export interface Piece {
   /** 구분 기호를 포함한 원문 조각. */
@@ -670,16 +652,6 @@ export function buildProfile(base: FormatProfile | null, server: ServerHint, pie
     timezone: base?.timezone ?? (kind === "error" ? { kind: "fixed", offset_seconds: 9 * 3600 } : { kind: "from_input" }),
     strategy: { kind: "blocks", blocks: buildBlocks(pieces, roles, sep, vocab) },
   };
-}
-
-/** 서버 종류에 맞는 템플릿만 고른다. 사용자 프리셋은 항상 보인다. `keep`은 현재 선택이라 목록에 남긴다. */
-export function templatesFor<T extends { name: string; source: "builtin" | "user"; profile: FormatProfile }>(server: ServerHint, list: T[], keep: string): T[] {
-  return list.filter((p) => {
-    if (p.source === "user" || p.name === keep || server === "unknown") return true;
-    const hint = p.profile.server_hint;
-    if (server === "iis") return hint === "iis";
-    return hint === server || hint === "unknown";
-  });
 }
 
 /** "메시지 + 상세 분리" 뒤에 흡수된 조각에 붙일 표시용 라벨. `key:` 조각에는 항목 이름, 그 값 조각에는 같은 색만. */

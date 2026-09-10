@@ -17,8 +17,10 @@ const MAX_NESTING: usize = 8;
 pub struct CompiledBlocks {
     regex: Regex,
     fields: Vec<FieldDef>,
-    /// 정규식 블록에서 온 이름 있는 캡처(확장 필드).
-    extra_groups: Vec<String>,
+    /// Capture group number per field, same order as `fields`.
+    field_groups: Vec<usize>,
+    /// Named captures from regex blocks (extra fields), with their group numbers.
+    extra_groups: Vec<(String, usize)>,
 }
 
 impl CompiledBlocks {
@@ -46,22 +48,29 @@ impl CompiledBlocks {
         let regex = regex::RegexBuilder::new(&pattern)
             .size_limit(REGEX_SIZE_LIMIT)
             .build()?;
-        let extra_groups = regex
-            .capture_names()
-            .flatten()
-            .filter(|n| !is_field_group(n))
-            .map(str::to_owned)
-            .collect();
+        // Resolve group names once. The hot path then indexes groups by number.
+        let mut field_groups = vec![usize::MAX; fields.len()];
+        let mut extra_groups = Vec::new();
+        for (group, name) in regex.capture_names().enumerate() {
+            let Some(name) = name else { continue };
+            match field_index(name) {
+                Some(i) if i < field_groups.len() => field_groups[i] = group,
+                Some(_) => {}
+                None => extra_groups.push((name.to_owned(), group)),
+            }
+        }
+        if let Some(i) = field_groups.iter().position(|g| *g == usize::MAX) {
+            return Err(EngineError::Format(format!(
+                "필드 {}의 캡처 그룹을 찾을 수 없음",
+                fields[i].name
+            )));
+        }
         Ok(Self {
             regex,
             fields,
+            field_groups,
             extra_groups,
         })
-    }
-
-    /// 정규식 원문(진단용).
-    pub fn pattern(&self) -> &str {
-        self.regex.as_str()
     }
 
     /// 필드 정의 목록.
@@ -69,38 +78,49 @@ impl CompiledBlocks {
         &self.fields
     }
 
-    /// 한 줄을 매칭해 필드별 원문 구간과 정규식 블록의 확장 캡처를 돌려준다. 매칭 실패면 `None`.
-    pub fn capture<'p, 'a>(&'p self, line: &'a str) -> Option<Captured<'p, 'a>> {
-        let caps = self.regex.captures(line)?;
-        let values = (0..self.fields.len())
-            .map(|i| caps.name(&field_group(i)).map(|m| m.as_str()))
-            .collect();
-        let extras = self
-            .extra_groups
-            .iter()
-            .filter_map(|name| caps.name(name).map(|m| (name.as_str(), m.as_str())))
-            .collect();
-        Some(Captured { values, extras })
+    /// Reusable match buffer. Allocated once per parser, not per line.
+    pub fn match_buf(&self) -> MatchBuf {
+        MatchBuf(self.regex.capture_locations())
+    }
+
+    /// 한 줄을 매칭한다. 성공하면 `buf`에 그룹 위치가 담긴다. 줄당 할당이 없다.
+    pub fn match_line(&self, line: &str, buf: &mut MatchBuf) -> bool {
+        self.regex.captures_read(&mut buf.0, line).is_some()
+    }
+
+    /// 매칭 뒤 `i`번째 필드의 원문. 선택 그룹 안에서 매칭되지 않았으면 `None`.
+    pub fn field_value<'a>(&self, i: usize, line: &'a str, buf: &MatchBuf) -> Option<&'a str> {
+        let group = *self.field_groups.get(i)?;
+        buf.0.get(group).map(|(s, e)| &line[s..e])
+    }
+
+    /// 매칭 뒤 정규식 블록의 이름 있는 캡처.
+    pub fn extras<'p, 'a>(
+        &'p self,
+        line: &'a str,
+        buf: &'p MatchBuf,
+    ) -> impl Iterator<Item = (&'p str, &'a str)> + use<'p, 'a> {
+        self.extra_groups.iter().filter_map(move |(name, group)| {
+            buf.0.get(*group).map(|(s, e)| (name.as_str(), &line[s..e]))
+        })
     }
 }
 
-/// 매칭 결과. 필드 순서는 [`CompiledBlocks::fields`]와 같다.
+/// 재사용 매칭 버퍼.
 #[derive(Debug)]
-pub struct Captured<'p, 'a> {
-    /// 필드별 원문 구간. 선택 그룹 안의 필드가 매칭되지 않았으면 `None`.
-    pub values: Vec<Option<&'a str>>,
-    /// 정규식 블록의 이름 있는 캡처.
-    pub extras: Vec<(&'p str, &'a str)>,
+pub struct MatchBuf(regex::CaptureLocations);
+
+/// `f{n}` 그룹 이름의 필드 번호.
+fn field_index(name: &str) -> Option<usize> {
+    let rest = name.strip_prefix('f')?;
+    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse().ok()
 }
 
 fn field_group(i: usize) -> String {
     format!("f{i}")
-}
-
-fn is_field_group(name: &str) -> bool {
-    name.strip_prefix('f')
-        .map(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
-        .unwrap_or(false)
 }
 
 fn emit_blocks(
@@ -119,7 +139,7 @@ fn emit_blocks(
             Block::Literal { text } => out.push_str(&regex::escape(text)),
             Block::Whitespace => out.push_str("[ \\t]+"),
             Block::Field(def) => {
-                if def.name.is_empty() || is_field_group(&def.name) {
+                if def.name.is_empty() || field_index(&def.name).is_some() {
                     return Err(EngineError::Format(
                         "필드 이름이 비었거나 예약된 형식(f0, f1, ...)임".to_owned(),
                     ));
@@ -174,7 +194,11 @@ fn validate_user_pattern(pattern: &str) -> EngineResult<()> {
     let tmp = regex::RegexBuilder::new(pattern)
         .size_limit(REGEX_SIZE_LIMIT)
         .build()?;
-    if tmp.capture_names().flatten().any(is_field_group) {
+    if tmp
+        .capture_names()
+        .flatten()
+        .any(|n| field_index(n).is_some())
+    {
         return Err(EngineError::Format(
             "정규식 블록에 예약된 그룹 이름(f0, f1, ...)을 쓸 수 없음".to_owned(),
         ));
@@ -197,6 +221,19 @@ mod tests {
         })
     }
 
+    /// 한 줄을 매칭해 필드별 원문을 모은다. 테스트 편의용.
+    fn values(compiled: &CompiledBlocks, line: &str) -> Option<Vec<Option<String>>> {
+        let mut buf = compiled.match_buf();
+        if !compiled.match_line(line, &mut buf) {
+            return None;
+        }
+        Some(
+            (0..compiled.fields().len())
+                .map(|i| compiled.field_value(i, line, &buf).map(str::to_owned))
+                .collect(),
+        )
+    }
+
     #[test]
     fn quoted_capture_excludes_quotes_and_keeps_escapes() {
         let blocks = vec![Block::Field(FieldDef {
@@ -206,8 +243,8 @@ mod tests {
             missing: vec![],
         })];
         let compiled = CompiledBlocks::compile(&blocks).unwrap();
-        let caps = compiled.capture(r#""Mozilla \"x\" 1.0""#).unwrap();
-        assert_eq!(caps.values[0], Some(r#"Mozilla \"x\" 1.0"#));
+        let vals = values(&compiled, r#""Mozilla \"x\" 1.0""#).unwrap();
+        assert_eq!(vals[0].as_deref(), Some(r#"Mozilla \"x\" 1.0"#));
     }
 
     #[test]
@@ -219,8 +256,8 @@ mod tests {
             missing: vec![],
         })];
         let compiled = CompiledBlocks::compile(&blocks).unwrap();
-        let caps = compiled.capture("[10/Oct/2000:13:55:36 -0700]").unwrap();
-        assert_eq!(caps.values[0], Some("10/Oct/2000:13:55:36 -0700"));
+        let vals = values(&compiled, "[10/Oct/2000:13:55:36 -0700]").unwrap();
+        assert_eq!(vals[0].as_deref(), Some("10/Oct/2000:13:55:36 -0700"));
     }
 
     #[test]
@@ -232,8 +269,10 @@ mod tests {
             },
         ];
         let compiled = CompiledBlocks::compile(&blocks).unwrap();
-        let caps = compiled.capture("x").unwrap();
-        assert_eq!(caps.values, vec![Some("x"), None]);
+        assert_eq!(
+            values(&compiled, "x").unwrap(),
+            vec![Some("x".to_owned()), None]
+        );
     }
 
     #[test]
@@ -246,8 +285,10 @@ mod tests {
             },
         ];
         let compiled = CompiledBlocks::compile(&blocks).unwrap();
-        let caps = compiled.capture("x rt=0.25").unwrap();
-        assert_eq!(caps.extras, vec![("response_time", "0.25")]);
+        let mut buf = compiled.match_buf();
+        assert!(compiled.match_line("x rt=0.25", &mut buf));
+        let extras: Vec<_> = compiled.extras("x rt=0.25", &buf).collect();
+        assert_eq!(extras, vec![("response_time", "0.25")]);
     }
 
     #[test]
@@ -270,7 +311,7 @@ mod tests {
     #[test]
     fn line_not_matching_anchored_pattern_returns_none() {
         let compiled = CompiledBlocks::compile(&[token("a")]).unwrap();
-        assert!(compiled.capture("two tokens").is_none());
+        assert!(values(&compiled, "two tokens").is_none());
     }
 
     #[test]

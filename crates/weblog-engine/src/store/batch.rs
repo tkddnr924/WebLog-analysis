@@ -158,11 +158,7 @@ fn write_batch(conn: &Connection, batch: &PendingBatch) -> EngineResult<CommitOu
     {
         return Ok(CommitOutcome::AlreadyCommitted { batch_id: existing });
     }
-    let batch_id: i64 = conn.query_row(
-        "SELECT COALESCE(MAX(batch_id), 0) + 1 FROM import_batches",
-        [],
-        |r| r.get(0),
-    )?;
+    let batch_id = super::next_id(conn, "import_batches", "batch_id")?;
 
     {
         let mut app = conn.appender("logs")?;

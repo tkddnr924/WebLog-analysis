@@ -9,9 +9,9 @@ use weblog_engine::preview::PreviewResult;
 use weblog_engine::store::{LogFilter, LogPage, PageRequest};
 use weblog_engine::store::{SavedView, StatsRequest, StatsResult, ViewDefinition};
 use weblog_service::{
-    CaseInfo, DetailView, ImportFinishedView, ImportProgressView, JobView, PresetView,
-    PreviewRequest, ProfileListView, ProfileView, ProjectInfo, SampleLines, ScanRequest,
-    ScanResponse, Service, ServiceError, ServiceResult, StartImportRequest, ValidationView,
+    CaseInfo, DetailView, ImportFinishedView, ImportProgressView, PresetView, PreviewRequest,
+    ProfileListView, ProfileView, ProjectInfo, SampleLines, ScanRequest, ScanResponse, Service,
+    ServiceError, ServiceResult, StartImportRequest, ValidationView,
 };
 use weblog_service::{ExportFinishedView, ExportProgressView};
 
@@ -64,13 +64,15 @@ pub async fn delete_case(state: ServiceState<'_>, path: String) -> ServiceResult
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn close_project(state: ServiceState<'_>) -> ServiceResult<()> {
-    state.close_project()
+pub async fn close_project(state: ServiceState<'_>) -> ServiceResult<()> {
+    let s = owned(&state);
+    blocking(move || s.close_project()).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn current_project(state: ServiceState<'_>) -> ServiceResult<Option<ProjectInfo>> {
-    state.current_project()
+pub async fn current_project(state: ServiceState<'_>) -> ServiceResult<Option<ProjectInfo>> {
+    let s = owned(&state);
+    blocking(move || s.current_project()).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -79,8 +81,9 @@ pub fn list_presets(state: ServiceState<'_>) -> Vec<PresetView> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn list_profiles(state: ServiceState<'_>) -> ServiceResult<ProfileListView> {
-    state.list_profiles()
+pub async fn list_profiles(state: ServiceState<'_>) -> ServiceResult<ProfileListView> {
+    let s = owned(&state);
+    blocking(move || s.list_profiles()).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -102,13 +105,18 @@ pub fn profile_to_yaml(state: ServiceState<'_>, profile: FormatProfile) -> Servi
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn save_profile(state: ServiceState<'_>, profile: FormatProfile) -> ServiceResult<ProfileView> {
-    state.save_profile(&profile)
+pub async fn save_profile(
+    state: ServiceState<'_>,
+    profile: FormatProfile,
+) -> ServiceResult<ProfileView> {
+    let s = owned(&state);
+    blocking(move || s.save_profile(&profile)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn delete_profile(state: ServiceState<'_>, name: String) -> ServiceResult<bool> {
-    state.delete_profile(&name)
+pub async fn delete_profile(state: ServiceState<'_>, name: String) -> ServiceResult<bool> {
+    let s = owned(&state);
+    blocking(move || s.delete_profile(&name)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -146,14 +154,14 @@ pub async fn sample_lines(
     blocking(move || s.sample_lines(&path, max_lines)).await
 }
 
+/// Starts an import. Waits only for job registration; progress and completion arrive via events and `import_status`.
 #[tauri::command(rename_all = "snake_case")]
-pub fn start_import(state: ServiceState<'_>, request: StartImportRequest) -> ServiceResult<i64> {
-    state.inner().start_import(request)
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub fn resume_job(state: ServiceState<'_>, job_id: i64, full_verify: bool) -> ServiceResult<i64> {
-    state.inner().resume_job(job_id, full_verify)
+pub async fn start_import(
+    state: ServiceState<'_>,
+    request: StartImportRequest,
+) -> ServiceResult<i64> {
+    let s = owned(&state);
+    blocking(move || s.start_import(request)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -177,38 +185,6 @@ pub fn import_status(state: ServiceState<'_>) -> ServiceResult<Option<ImportStat
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn list_jobs(state: ServiceState<'_>) -> ServiceResult<Vec<JobView>> {
-    let s = owned(&state);
-    blocking(move || s.list_jobs()).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn activate_job(
-    state: ServiceState<'_>,
-    job_id: i64,
-) -> ServiceResult<weblog_engine::store::JobInfo> {
-    let s = owned(&state);
-    blocking(move || s.activate_job(job_id)).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn delete_job_results(state: ServiceState<'_>, job_id: i64) -> ServiceResult<u64> {
-    let s = owned(&state);
-    blocking(move || s.delete_job_results(job_id)).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn verify_source(
-    state: ServiceState<'_>,
-    source_id: i64,
-    full: bool,
-    relink: Option<String>,
-) -> ServiceResult<weblog_engine::store::SourceVerification> {
-    let s = owned(&state);
-    blocking(move || s.verify_source(source_id, full, relink.map(PathBuf::from))).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
 pub async fn query_page(state: ServiceState<'_>, request: PageRequest) -> ServiceResult<LogPage> {
     let s = owned(&state);
     blocking(move || s.query_page(&request)).await
@@ -218,15 +194,6 @@ pub async fn query_page(state: ServiceState<'_>, request: PageRequest) -> Servic
 pub async fn count_logs(state: ServiceState<'_>, filter: LogFilter) -> ServiceResult<i64> {
     let s = owned(&state);
     blocking(move || s.count(&filter)).await
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn status_histogram(
-    state: ServiceState<'_>,
-    filter: LogFilter,
-) -> ServiceResult<Vec<(Option<i32>, i64)>> {
-    let s = owned(&state);
-    blocking(move || s.status_histogram(&filter)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]

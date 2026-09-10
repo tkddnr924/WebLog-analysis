@@ -1,5 +1,9 @@
 # 검증 기준
 
+## 검증 진행 방식
+
+기능 작업은 [AGENTS.md의 PLAN 관리·검증 규칙](../AGENTS.md)에 따라 테스트 코드를 먼저 작성하고, 기능 구현 후 해당 테스트를 실행해 결과를 확인한다. PLAN에는 각 단계를 별도 체크박스로 관리하고 완료 근거를 바로 다음 줄에 기록한다. 아래 시나리오 중 변경 범위에 해당하는 항목을 테스트 계획에 반영한다.
+
 ## 필수 정확성 시나리오
 - Apache/Nginx Common·Combined, IIS W3C 헤더 변경, Custom, Unknown+인식 가능한 포맷.
 - IPv4/IPv6, 요청 쿼리 문자열, 인용 문자열, 누락값, UTC 변환, 시간대 미확정.
@@ -25,6 +29,28 @@
 - 쿼리 세트: 시간 범위, 상태코드, IP, 경로, 시간 집계, 넓은 문자열 검색, 재구성 상세, 스트리밍 내보내기.
 - 실행 계획과 cold/warm cache 조건을 구분한다. 무거운 작업 직렬화와 취소 응답도 확인한다.
 - 실제 100GB 장비/데이터가 없으면 작은 실험만 수행하고 100GB 검증은 미실행으로 명시한다.
+
+## 검사 명령
+
+저장소 루트에서 로컬·CI 공통 진입점을 실행한다.
+
+```bash
+scripts/check.sh
+```
+
+```powershell
+scripts\check.ps1
+```
+
+공통 스크립트는 `apps/desktop`에서 `pnpm install --frozen-lockfile`과 `pnpm check`(타입 검사·린트·관련 테스트·프로덕션 빌드)를 실행한 뒤 다음 Rust 검사를 실행한다. Tauri 컴파일에 필요한 프런트엔드 `dist`를 먼저 생성한다.
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+Windows x64 Tauri 빌드와 실제 파일 선택·IPC·DB 연동은 별도로 확인한다. 공통 검사 통과만으로 네이티브 동작이나 대용량 성능 검증을 대체하지 않는다. 실행 결과와 미검증 사항은 [검증 기록](verification.md), 측정 수치는 [벤치마크](benchmarks.md)에 남긴다.
 
 ## 개발 검사
 - Cargo 포맷·Clippy·테스트와 React 타입·린트·테스트·빌드를 공통 진입점에 연결한다.

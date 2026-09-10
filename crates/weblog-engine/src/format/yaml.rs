@@ -3,8 +3,8 @@
 use super::model::FormatProfile;
 use crate::error::{EngineError, EngineResult};
 
-/// YAML 입력 길이 상한.
-const MAX_YAML_BYTES: usize = 256 * 1024;
+/// YAML input byte cap. Callers check file size before reading.
+pub const MAX_YAML_BYTES: usize = 256 * 1024;
 
 /// 정의를 YAML 문자열로.
 pub fn to_yaml(profile: &FormatProfile) -> EngineResult<String> {

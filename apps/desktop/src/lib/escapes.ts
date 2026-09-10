@@ -10,32 +10,30 @@ export function hasHexEscapes(text: string): boolean {
 export function decodeHexEscapes(text: string): { bytes: number[]; text: string } {
   const bytes: number[] = [];
   const enc = new TextEncoder();
+  // Request targets reach the 64KiB line cap; avoid one huge spread (engine arg/stack limit).
+  const pushSlice = (slice: string) => {
+    for (const b of enc.encode(slice)) bytes.push(b);
+  };
   let last = 0;
   for (const m of text.matchAll(HEX)) {
-    if (m.index > last) bytes.push(...enc.encode(text.slice(last, m.index)));
+    if (m.index > last) pushSlice(text.slice(last, m.index));
     bytes.push(parseInt(m[1], 16));
     last = m.index + m[0].length;
   }
-  if (last < text.length) bytes.push(...enc.encode(text.slice(last)));
+  if (last < text.length) pushSlice(text.slice(last));
   return { bytes, text: printable(bytes) };
 }
 
 /** 출력 가능한 ASCII와 UTF-8 문자는 그대로, 그 외는 `·`. */
 export function printable(bytes: number[]): string {
-  let s: string;
-  try {
-    s = new TextDecoder("utf-8", { fatal: false }).decode(new Uint8Array(bytes));
-  } catch {
-    s = String.fromCharCode(...bytes);
+  // fatal: false never throws; bad bytes become U+FFFD.
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(new Uint8Array(bytes));
+  let out = "";
+  for (const ch of decoded) {
+    const c = ch.codePointAt(0) ?? 0;
+    out += c === 0xfffd || c < 0x20 || (c >= 0x7f && c < 0xa0) ? "·" : ch;
   }
-  return Array.from(s)
-    .map((ch) => {
-      const c = ch.codePointAt(0) ?? 0;
-      if (c === 0xfffd) return "·";
-      if (c < 0x20 || (c >= 0x7f && c < 0xa0)) return "·";
-      return ch;
-    })
-    .join("");
+  return out;
 }
 
 export interface BinaryInfo {

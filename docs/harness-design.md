@@ -26,11 +26,13 @@
 
 ## 2. 규칙의 배치
 
-- 루트 AGENTS.md: 모든 작업에 적용하는 짧은 공통 규칙, 기술 결정 상태, 검사 명령, 관련 문서 안내.
-- docs/architecture.md: 의존 방향, 모듈 책임, IPC 계약.
+- 루트 [AGENTS.md](../AGENTS.md): 모든 작업에 적용하는 공통 개발 지침과 관련 문서 안내.
+- [docs/README.md](README.md): 프로젝트 위키 목차와 문서별 관리 대상.
+- [docs/project-overview.md](project-overview.md): 확정 범위, 대상 환경, 데이터 보존 정책.
+- [docs/architecture.md](architecture.md): 의존 방향과 데이터 처리 제약, 상세 모듈 책임·IPC 계약 문서 안내.
 - docs/parser-format.md: 포맷 정의, 필드 타입, 블록 조합과 정규식 변환 규칙.
 - docs/data-model.md: 정규화 스키마, 출처, 작업 상태, 재실행·마이그레이션 정책.
-- docs/testing.md: 필수 검증 시나리오와 벤치마크 방법.
+- [docs/testing.md](testing.md): 검사 명령, 필수 검증 시나리오와 벤치마크 방법.
 - docs/decisions/: 채택한 기술 및 중요한 변경의 이유와 대안.
 - scripts/check: 로컬과 CI가 함께 사용하는 검사 진입점.
 - fixtures/: 합성 로그, 포맷 정의, 예상 결과.

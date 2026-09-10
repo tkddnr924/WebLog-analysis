@@ -222,7 +222,7 @@ fn expr_sql(
                     };
                     if numeric {
                         let n: i64 = value.trim().parse().map_err(|_| {
-                            EngineError::Query(format!("{col} 비교 값은 정수여야 함: {value}"))
+                            EngineError::Query(format!("{col} 비교 값은 정수여야 함"))
                         })?;
                         out.push_str(&format!("{col} {sym} ?"));
                         params.push(Value::BigInt(n));
@@ -906,22 +906,6 @@ pub trait LogQuery {
             })
             .optional()?)
     }
-
-    /// 상태코드별 건수(간단 통계). 배치 범위를 고정하지 않으므로 실험용이다.
-    fn status_histogram(&self, filter: &LogFilter) -> EngineResult<Vec<(Option<i32>, i64)>> {
-        let base = filter_sql(filter)?;
-        let sql = format!(
-            "SELECT status, COUNT(*) FROM logs WHERE {} GROUP BY status ORDER BY status",
-            base.where_sql
-        );
-        let mut stmt = self.query_conn().prepare(&sql)?;
-        let rows = stmt
-            .query_map(params_from_iter(base.params), |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1156,11 +1140,15 @@ mod tests {
         r.filter.expr = Some(FilterExpr::And { items: vec![] });
         assert_eq!(store.count_matching(&r.filter).unwrap(), 8);
 
-        r.filter.expr = Some(cond(CondField::Status, CondOp::Gte, "abc"));
-        assert!(matches!(
-            store.query_page(&r).unwrap_err(),
-            EngineError::Query(_)
-        ));
+        r.filter.expr = Some(cond(CondField::Status, CondOp::Gte, "secret-value"));
+        let err = store.query_page(&r).unwrap_err();
+        assert!(matches!(err, EngineError::Query(_)));
+        let text = err.to_string();
+        assert!(text.contains("status"), "어느 필드인지 알려야 함: {text}");
+        assert!(
+            !text.contains("secret-value"),
+            "입력값을 오류 메시지에 남기지 않는다: {text}"
+        );
         r.filter.expr = Some(cond(CondField::Method, CondOp::Gt, "GET"));
         assert!(matches!(
             store.query_page(&r).unwrap_err(),

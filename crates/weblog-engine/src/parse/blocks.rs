@@ -1,7 +1,7 @@
 //! 블록 정의 기반 줄 파서. 정규식 매칭 뒤 필드 종류별로 의미 검증을 수행한다.
 
 use crate::error::EngineResult;
-use crate::format::{Block, CompiledBlocks, FieldDef, FieldKind, TimezonePolicy};
+use crate::format::{Block, CompiledBlocks, FieldDef, FieldKind, MatchBuf, TimezonePolicy};
 use crate::parse::record::{LineOutcome, LogRecord, ParseErrorCode, SkipReason};
 use crate::parse::semantic;
 
@@ -10,31 +10,36 @@ use crate::parse::semantic;
 pub struct BlocksParser {
     compiled: CompiledBlocks,
     timezone: TimezonePolicy,
+    /// Reused across lines so matching allocates nothing per line.
+    buf: MatchBuf,
 }
 
 impl BlocksParser {
     /// 블록을 컴파일한다.
     pub fn new(blocks: &[Block], timezone: TimezonePolicy) -> EngineResult<Self> {
+        let compiled = CompiledBlocks::compile(blocks)?;
+        let buf = compiled.match_buf();
         Ok(Self {
-            compiled: CompiledBlocks::compile(blocks)?,
+            compiled,
             timezone,
+            buf,
         })
     }
 
-    /// 컴파일된 정규식(진단용).
-    pub fn pattern(&self) -> &str {
-        self.compiled.pattern()
-    }
-
     /// 한 줄을 파싱한다.
-    pub fn parse_line(&self, line_number: u64, line: &str) -> LineOutcome {
+    pub fn parse_line(&mut self, line_number: u64, line: &str) -> LineOutcome {
         if line.trim().is_empty() {
             return LineOutcome::Skipped {
                 line_number,
                 reason: SkipReason::Blank,
             };
         }
-        let Some(captured) = self.compiled.capture(line) else {
+        let Self {
+            compiled,
+            timezone,
+            buf,
+        } = self;
+        if !compiled.match_line(line, buf) {
             if is_continuation(line) {
                 return LineOutcome::Skipped {
                     line_number,
@@ -42,21 +47,23 @@ impl BlocksParser {
                 };
             }
             return LineOutcome::error(line_number, ParseErrorCode::NoMatch, None);
-        };
+        }
         let mut record = LogRecord {
             line_number,
             ..LogRecord::default()
         };
-        for (def, value) in self.compiled.fields().iter().zip(captured.values) {
-            let Some(raw) = value else { continue };
+        for (i, def) in compiled.fields().iter().enumerate() {
+            let Some(raw) = compiled.field_value(i, line, buf) else {
+                continue;
+            };
             if def.missing.iter().any(|m| m == raw) {
                 continue;
             }
-            if let Err(code) = apply_field(&mut record, def, raw, self.timezone) {
+            if let Err(code) = apply_field(&mut record, def, raw, *timezone) {
                 return LineOutcome::error(line_number, code, Some(&def.name));
             }
         }
-        for (name, value) in captured.extras {
+        for (name, value) in compiled.extras(line, buf) {
             record.extra.insert(name.to_owned(), value.to_owned());
         }
         LineOutcome::Record(record)
@@ -223,7 +230,7 @@ mod tests {
 
     #[test]
     fn stack_trace_lines_are_skipped_as_continuation_not_errors() {
-        let parser = combined_parser();
+        let mut parser = combined_parser();
         for line in [
             "#0 /var/www/html/app/Http/Controllers/GpController.php(1220): app\\Models\\Company->detailInfo()",
             "    at java.base/java.lang.Thread.run(Thread.java:833)",

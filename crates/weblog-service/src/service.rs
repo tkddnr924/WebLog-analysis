@@ -417,6 +417,7 @@ impl Service {
                 })
                 .collect(),
             truncated: scan.truncated,
+            errors_truncated: scan.errors_truncated,
             directories_visited: scan.directories_visited,
             filtered_out: scan.filtered_out,
         })
@@ -793,22 +794,19 @@ impl Service {
         Ok(out)
     }
 
-    /// 작업 하나.
-    pub fn job(&self, job_id: i64) -> ServiceResult<JobInfo> {
-        let project = self.project()?;
-        let info = project.readers.acquire().job(job_id)?;
-        Ok(info)
-    }
-
     fn with_store<T>(&self, f: impl FnOnce(&mut Store) -> ServiceResult<T>) -> ServiceResult<T> {
         self.ensure_no_import()?;
         let project = self.project()?;
-        let mut store = project
-            .store
-            .try_lock()
-            .map_err(|_| ServiceError::ImportRunning {
-                job_id: lock(&self.import).as_ref().map_or(0, |r| *lock(&r.job_id)),
-            })?;
+        // Poisoning means an earlier owner panicked; recover and go on. Only contention is an import.
+        let mut store = match project.store.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(ServiceError::ImportRunning {
+                    job_id: lock(&self.import).as_ref().map_or(0, |r| *lock(&r.job_id)),
+                })
+            }
+        };
         f(&mut store)
     }
 
@@ -880,11 +878,6 @@ impl Service {
     /// 전체 건수. 무거운 조회이므로 동시 1개로 제한한다.
     pub fn count(&self, filter: &LogFilter) -> ServiceResult<i64> {
         self.heavy(|r| Ok(r.count_matching(filter)?))
-    }
-
-    /// 상태코드 분포. 무거운 조회.
-    pub fn status_histogram(&self, filter: &LogFilter) -> ServiceResult<Vec<(Option<i32>, i64)>> {
-        self.heavy(|r| Ok(r.status_histogram(filter)?))
     }
 
     /// 기본 통계. 무거운 조회.
@@ -1137,6 +1130,16 @@ mod tests {
         }
     }
 
+    fn job_of(service: &Service, job_id: i64) -> JobInfo {
+        service
+            .list_jobs()
+            .unwrap()
+            .into_iter()
+            .find(|v| v.job.job_id == job_id)
+            .expect("job exists")
+            .job
+    }
+
     #[test]
     fn open_scan_import_query_detail_flow() {
         let dir = tempfile::tempdir().unwrap();
@@ -1221,11 +1224,41 @@ mod tests {
         service.cancel_import().unwrap();
         let done = wait_finished(&service);
         assert_eq!(done.status, "cancelled");
-        assert!(service.job(job_id).unwrap().status.is_resumable());
+        assert!(job_of(&service, job_id).status.is_resumable());
         service.resume_job(job_id, false).unwrap();
         let done = wait_finished(&service);
         assert_eq!(done.status, "completed");
         assert_eq!(service.count(&LogFilter::default()).unwrap(), 200_000);
+    }
+
+    #[test]
+    fn start_import_returns_job_id_before_first_batch_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = temp_log(dir.path(), "big.log", 200_000);
+        let service = Arc::new(Service::new(ServiceConfig::default()));
+        service.open_project(dir.path().join("p.duckdb")).unwrap();
+        // A batch boundary past EOF means the only commit happens when the import ends.
+        let job_id = service
+            .start_import(StartImportRequest {
+                profile: preset("combined"),
+                paths: vec![log],
+                replaces_job_id: None,
+                batch_max_rows: Some(1_000_000),
+                batch_max_bytes: Some(1 << 30),
+            })
+            .unwrap();
+        let (progress, finished) = service
+            .import_status()
+            .unwrap()
+            .expect("반환 직후에는 가져오기가 진행 중이다");
+        assert_eq!(progress.job_id, job_id, "작업 ID는 첫 커밋 전에 확정된다");
+        assert_eq!(
+            progress.committed_batches, 0,
+            "start_import가 첫 배치 커밋까지 기다리면 안 됨"
+        );
+        assert!(finished.is_none(), "start_import가 종료까지 기다리면 안 됨");
+        service.cancel_import().unwrap();
+        assert_eq!(wait_finished(&service).status, "cancelled");
     }
 
     #[test]
@@ -1258,6 +1291,38 @@ mod tests {
             "finish is consumed once"
         );
         assert!(service.ensure_no_import().is_ok());
+    }
+
+    #[test]
+    fn poisoned_store_lock_is_recovered_not_reported_as_import_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Arc::new(Service::new(ServiceConfig::default()));
+        service.open_project(dir.path().join("p.duckdb")).unwrap();
+        let project = service.project().unwrap();
+        let store = Arc::clone(&project.store);
+        // A thread that panics while holding the write store lock poisons the mutex (no import runs).
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let _ = std::thread::spawn(move || {
+            let _guard = store.lock().unwrap_or_else(|e| e.into_inner());
+            panic!("owner thread died");
+        })
+        .join();
+        std::panic::set_hook(hook);
+        assert!(project.store.is_poisoned(), "테스트 전제: 락이 포이즈닝됨");
+        let view = service
+            .save_view(
+                "all",
+                &ViewDefinition {
+                    filter: LogFilter::default(),
+                    sort: weblog_engine::store::SortOrder::TimeAsc,
+                    columns: Vec::new(),
+                    rule_source: None,
+                },
+            )
+            .expect("포이즈닝은 복구하고 진행해야 함");
+        assert_eq!(view.name, "all");
+        assert_eq!(service.list_views().unwrap().len(), 1);
     }
 
     #[test]
@@ -1303,7 +1368,7 @@ mod tests {
             .unwrap();
         let done = wait_finished(&service);
         assert_eq!(done.status, "completed");
-        assert!(!service.job(second).unwrap().active);
+        assert!(!job_of(&service, second).active);
         service.activate_job(second).unwrap();
         let d = service.detail(Some(second), 1, 1).unwrap().unwrap();
         assert_eq!((d.profile_name.as_str(), d.profile_version), ("site_v2", 2));

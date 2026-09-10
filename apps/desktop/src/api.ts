@@ -16,8 +16,6 @@ import type {
   ValidationView,
   ImportEvent,
   ImportStatusView,
-  JobInfo,
-  JobView,
   LogFilter,
   LogPage,
   PageRequest,
@@ -28,7 +26,6 @@ import type {
   SampleLines,
   ScanRequest,
   ScanResponse,
-  SourceVerification,
   StartImportRequest,
 } from "./types";
 
@@ -53,14 +50,8 @@ export const api = {
     invoke<PreviewResult>("preview_format", { request: { path, profile, max_lines } }),
   sampleLines: (path: string, max_lines: number) => invoke<SampleLines>("sample_lines", { path, max_lines }),
   startImport: (request: StartImportRequest) => invoke<number>("start_import", { request }),
-  resumeJob: (job_id: number, full_verify: boolean) => invoke<number>("resume_job", { job_id, full_verify }),
   cancelImport: () => invoke<void>("cancel_import"),
   importStatus: () => invoke<ImportStatusView | null>("import_status"),
-  listJobs: () => invoke<JobView[]>("list_jobs"),
-  activateJob: (job_id: number) => invoke<JobInfo>("activate_job", { job_id }),
-  deleteJobResults: (job_id: number) => invoke<number>("delete_job_results", { job_id }),
-  verifySource: (source_id: number, full: boolean, relink: string | null) =>
-    invoke<SourceVerification>("verify_source", { source_id, full, relink }),
   queryPage: (request: PageRequest) => invoke<LogPage>("query_page", { request }),
   countLogs: (filter: LogFilter) => invoke<number>("count_logs", { filter }),
   logDetail: (job_id: number | null, source_id: number, line_number: number) =>

@@ -112,7 +112,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     const info = await api.openProject(path);
     setProject(info);
     if (info.interrupted_jobs.length > 0) {
-      setNotice(`이전 실행이 비정상 종료된 작업 ${info.interrupted_jobs.join(", ")}이(가) 있습니다. 결과 화면의 작업 탭에서 재개할 수 있습니다.`);
+      setNotice(`이전 실행이 비정상 종료된 작업 ${info.interrupted_jobs.join(", ")}이(가) 있습니다. 재개는 CLI(\`weblog resume\`)로 합니다.`);
     }
   }, []);
 

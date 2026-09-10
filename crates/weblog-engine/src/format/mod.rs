@@ -7,7 +7,7 @@ pub mod presets;
 pub mod validate;
 pub mod yaml;
 
-pub use compile::CompiledBlocks;
+pub use compile::{CompiledBlocks, MatchBuf};
 pub use library::{ProfileLibrary, ProfileListing, StoredProfile};
 pub use model::{
     Block, Capture, FieldDef, FieldKind, FormatProfile, ServerHint, Strategy, TimestampFormat,

@@ -57,6 +57,18 @@ impl ProfileLibrary {
         Ok(self.dir.join(format!("{name}.yaml")))
     }
 
+    /// Reads a profile file, rejecting oversized files before loading them.
+    fn read_profile(path: &Path) -> EngineResult<FormatProfile> {
+        let size = std::fs::metadata(path)?.len();
+        if size > yaml::MAX_YAML_BYTES as u64 {
+            return Err(EngineError::Limit(format!(
+                "프로필 파일이 상한 {}바이트를 넘음",
+                yaml::MAX_YAML_BYTES
+            )));
+        }
+        yaml::from_yaml(&std::fs::read_to_string(path)?)
+    }
+
     /// 저장된 프로필 목록(이름순). 읽을 수 없는 파일은 건너뛰고 오류 목록으로 돌려준다.
     pub fn list(&self) -> EngineResult<ProfileListing> {
         let mut out = Vec::new();
@@ -76,10 +88,7 @@ impl ProfileLibrary {
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            match std::fs::read_to_string(&path)
-                .map_err(EngineError::from)
-                .and_then(|t| yaml::from_yaml(&t))
-            {
+            match Self::read_profile(&path) {
                 Ok(profile) => out.push(StoredProfile {
                     name: stem.to_owned(),
                     path: path.clone(),
@@ -98,11 +107,10 @@ impl ProfileLibrary {
     /// 이름으로 읽는다.
     pub fn load(&self, name: &str) -> EngineResult<Option<FormatProfile>> {
         let path = self.path_for(name)?;
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(Some(yaml::from_yaml(&text)?)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
+        if !path.exists() {
+            return Ok(None);
         }
+        Ok(Some(Self::read_profile(&path)?))
     }
 
     /// 검증 후 저장한다. 파일 이름은 정의의 `name`이다. 내장 프리셋 이름은 거부한다.
@@ -181,5 +189,22 @@ mod tests {
         let listing = lib.list().unwrap();
         assert!(listing.profiles.is_empty());
         assert_eq!(listing.errors.len(), 1);
+    }
+
+    #[test]
+    fn oversized_yaml_is_rejected_without_reading_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = "a".repeat(yaml::MAX_YAML_BYTES + 1);
+        std::fs::write(dir.path().join("big.yaml"), &big).unwrap();
+        let lib = ProfileLibrary::new(dir.path());
+        let listing = lib.list().unwrap();
+        assert!(listing.profiles.is_empty());
+        assert_eq!(listing.errors.len(), 1);
+        assert!(
+            listing.errors[0].1.contains("상한"),
+            "상한 초과로 보고해야 함: {}",
+            listing.errors[0].1
+        );
+        assert!(matches!(lib.load("big"), Err(EngineError::Limit(_))));
     }
 }

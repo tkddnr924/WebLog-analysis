@@ -124,11 +124,7 @@ impl Store {
                 id
             }
             None => {
-                let id: i64 = self.conn().query_row(
-                    "SELECT COALESCE(MAX(view_id), 0) + 1 FROM saved_views",
-                    [],
-                    |r| r.get(0),
-                )?;
+                let id = super::next_id(self.conn(), "saved_views", "view_id")?;
                 self.conn().execute(
                     "INSERT INTO saved_views (view_id, name, definition_json) VALUES (?, ?, ?)",
                     params![id, name, json],

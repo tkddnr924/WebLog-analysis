@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBlocks, buildProfile, guessErrorRoles, guessRoles, guessSeparator, inferTsFormat, restIndex, roleForKind, rolesFromProfile, separatorOf, tailLabels, templatesFor, tokenize, vocabFor } from "./puzzle";
+import { buildBlocks, buildProfile, guessErrorRoles, guessRoles, guessSeparator, inferTsFormat, restIndex, roleForKind, rolesFromProfile, separatorOf, tailLabels, tokenize, vocabFor } from "./puzzle";
 
 const G = vocabFor("unknown");
 const NG = vocabFor("nginx");
@@ -119,17 +119,6 @@ describe("buildBlocks", () => {
     expect(buildProfile(p, "apache", pieces, roles, "space", AP).name).toBe("combined_edit");
     expect(p.strategy.kind === "blocks" && p.strategy.blocks[0]).toMatchObject({ block: "field", name: "client_ip", kind: { kind: "client_ip" } });
     expect(p.timezone).toEqual({ kind: "from_input" });
-  });
-});
-
-describe("templatesFor", () => {
-  const mk = (name: string, hint: FormatProfile["server_hint"], source: "builtin" | "user" = "builtin") => ({ name, source, profile: { ...combined, name, server_hint: hint } });
-  const list = [mk("common", "unknown"), mk("combined", "unknown"), mk("apache_combined", "apache"), mk("nginx_combined", "nginx"), mk("iis_w3c", "iis"), mk("mine", "iis", "user")];
-  it("filters by server hint but keeps user presets and the current choice", () => {
-    expect(templatesFor("apache", list, "combined").map((p) => p.name)).toEqual(["common", "combined", "apache_combined", "mine"]);
-    expect(templatesFor("iis", list, "iis_w3c").map((p) => p.name)).toEqual(["iis_w3c", "mine"]);
-    expect(templatesFor("iis", list, "combined").map((p) => p.name)).toEqual(["combined", "iis_w3c", "mine"]);
-    expect(templatesFor("unknown", list, "combined")).toHaveLength(6);
   });
 });
 

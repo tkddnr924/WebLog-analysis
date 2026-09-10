@@ -72,9 +72,9 @@ enum Command {
         /// 프리셋 이름(common, combined, apache_combined, nginx_combined, iis_w3c) 또는 프로필 JSON 경로.
         #[arg(long)]
         format: String,
-        #[arg(long, default_value_t = 50_000)]
+        #[arg(long, default_value_t = 100_000)]
         batch_rows: usize,
-        #[arg(long, default_value_t = 32 * 1024 * 1024)]
+        #[arg(long, default_value_t = 48 * 1024 * 1024)]
         batch_bytes: usize,
         #[arg(long, default_value_t = 64 * 1024)]
         max_line_bytes: usize,
@@ -100,7 +100,7 @@ enum Command {
         db: PathBuf,
         #[arg(long)]
         job: i64,
-        #[arg(long, default_value_t = 50_000)]
+        #[arg(long, default_value_t = 100_000)]
         batch_rows: usize,
         /// 재개 전 전체 파일 해시를 검증한다(파일 전체를 한 번 더 읽음).
         #[arg(long)]
@@ -623,6 +623,7 @@ fn main() -> Result<()> {
                 "entries": scan.entries,
                 "errors": scan.errors,
                 "truncated": scan.truncated,
+                "errors_truncated": scan.errors_truncated,
                 "directories_visited": scan.directories_visited,
                 "filtered_out": scan.filtered_out,
             });

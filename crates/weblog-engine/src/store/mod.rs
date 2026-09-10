@@ -182,6 +182,8 @@ impl Store {
         };
         store.configure(config)?;
         schema::migrate(&store.conn)?;
+        // Raw log text is never stored; refuse a database that carries such a column.
+        schema::assert_no_raw_columns(&store.conn)?;
         store.mark_interrupted_jobs()?;
         // DDL이 WAL에 남은 채 비정상 종료되면 다음 열기에서 재생에 실패할 수 있다. 열자마자 체크포인트로 비운다.
         store.checkpoint()?;
@@ -200,6 +202,7 @@ impl Store {
         let mut store = Self { conn, path: None };
         store.configure(config)?;
         schema::migrate(&store.conn)?;
+        schema::assert_no_raw_columns(&store.conn)?;
         Ok(store)
     }
 
@@ -240,11 +243,6 @@ impl Store {
     /// 같은 DB에 대한 읽기 전용 연결. 가져오기와 조회를 다른 스레드에서 동시에 수행할 때 쓴다.
     pub fn open_reader(&self) -> EngineResult<Reader> {
         Ok(Reader::new(self.conn.try_clone()?))
-    }
-
-    /// DB 파일 경로.
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
     }
 
     // ----- 프로필 -----
@@ -554,14 +552,18 @@ impl Store {
     }
 
     fn next_id(&self, table: &str, column: &str) -> EngineResult<i64> {
-        // 테이블·컬럼 이름은 crate 내부 상수만 들어온다.
-        let v: i64 = self.conn.query_row(
-            &format!("SELECT COALESCE(MAX({column}), 0) + 1 FROM {table}"),
-            [],
-            |r| r.get(0),
-        )?;
-        Ok(v)
+        next_id(&self.conn, table, column)
     }
+}
+
+/// Next id for a table without a sequence. Table and column come from crate constants only.
+pub(crate) fn next_id(conn: &Connection, table: &str, column: &str) -> EngineResult<i64> {
+    let v: i64 = conn.query_row(
+        &format!("SELECT COALESCE(MAX({column}), 0) + 1 FROM {table}"),
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(v)
 }
 
 pub(crate) const JOB_SELECT: &str = "SELECT job_id, result_version, status, profile_id, committed_records, committed_errors, committed_skipped, active, replaces_job_id, failure_reason FROM import_jobs";
@@ -770,5 +772,23 @@ mod tests {
         assert_eq!(wal_len, 0, "스키마 DDL이 WAL에 남아 있으면 안 됨");
         drop(store);
         Store::open(&path, &StoreConfig::default()).unwrap();
+    }
+
+    #[test]
+    fn opening_a_store_with_a_raw_column_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("raw.duckdb");
+        let store = Store::open(&path, &StoreConfig::default()).unwrap();
+        store
+            .conn()
+            .execute_batch("CREATE TABLE sidecar (raw_line TEXT)")
+            .unwrap();
+        store.checkpoint().unwrap();
+        drop(store);
+        let err = Store::open(&path, &StoreConfig::default()).unwrap_err();
+        assert!(
+            matches!(err, EngineError::Format(_)),
+            "원문 저장 의심 컬럼은 열기 단계에서 막아야 함: {err}"
+        );
     }
 }

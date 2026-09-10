@@ -110,6 +110,8 @@ pub struct ScanResponse {
     pub errors: Vec<ScanIssue>,
     /// 항목 수 상한으로 잘렸는지.
     pub truncated: bool,
+    /// 오류 목록이 상한으로 잘렸는지.
+    pub errors_truncated: bool,
     /// 살펴본 디렉터리 수.
     pub directories_visited: usize,
     /// 패턴에 걸러진 파일 수.

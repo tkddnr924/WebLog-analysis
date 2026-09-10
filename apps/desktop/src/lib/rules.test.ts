@@ -51,11 +51,20 @@ const req = (request_target: string, status = 200, user_agent: string | null = "
 
 describe("builtin rules", () => {
   it("compile and carry names", () => {
-    expect(BUILTIN_RULES.length).toBeGreaterThanOrEqual(18);
+    expect(BUILTIN_RULES.length).toBeGreaterThanOrEqual(15);
     expect(BUILTIN_RULES[0]).toMatchObject({ id: "builtin:bookmarks", builtin: true });
     expect(ruleFilter(BUILTIN_RULES[0], { active_only: true })).toMatchObject({ bookmarked_only: true, active_only: true });
     expect(BUILTIN_RULES[1]).toMatchObject({ id: "builtin:all_requests", name: "전체 요청", builtin: true });
-    expect(ruleFilter(byId("server_errors"), { active_only: true })).toMatchObject({ active_only: true, expr: { kind: "cond", field: "status", op: "gte", value: "500" } });
+    expect(ruleFilter(byId("ok_responses"), { active_only: true })).toMatchObject({
+      active_only: true,
+      expr: {
+        kind: "and",
+        items: [
+          { kind: "cond", field: "status", op: "gte", value: "200" },
+          { kind: "cond", field: "status", op: "lte", value: "299" },
+        ],
+      },
+    });
   });
 
   it("signatures hit typical payloads and skip plain paths", () => {
@@ -85,9 +94,6 @@ describe("builtin rules", () => {
     expect(evalExpr(byId("lfi_ssrf").expr, req("/page?file=php://filter/convert.base64-encode/resource=index"))).toBe(true);
     expect(evalExpr(byId("lfi_ssrf").expr, req("/fetch?url=http://169.254.169.254/latest/meta-data/"))).toBe(true);
     expect(evalExpr(byId("webshell_upload").expr, req("/uploads/2026/shell.php?cmd=id"))).toBe(true);
-    expect(evalExpr(byId("unusual_methods").expr, { ...req("/"), method: "PROPFIND" })).toBe(true);
-    expect(evalExpr(byId("unusual_methods").expr, req("/"))).toBe(false);
-    expect(evalExpr(byId("large_responses").expr, { ...req("/big.zip"), bytes_sent: 50 * 1024 * 1024 })).toBe(true);
     expect(evalExpr(byId("scanner_tools").expr, req("/", 200, "Mozilla/5.0 (Nikto/2.1.6)"))).toBe(true);
     for (const r of BUILTIN_RULES.filter((x) => !["bookmarks", "all_requests", "ok_responses"].some((id) => x.id === `builtin:${id}`))) {
       expect(evalExpr(r.expr, req("/index.html")), r.id).toBe(false);

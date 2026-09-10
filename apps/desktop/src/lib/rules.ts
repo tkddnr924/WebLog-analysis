@@ -112,14 +112,6 @@ export const BUILTIN_SOURCES: string[] = [
     condition:
         status in 200..299 and any of them
 }`,
-  `rule server_errors
-{
-    meta:
-        name = "서버 오류"
-        description = "상태 5xx."
-    condition:
-        status >= 500
-}`,
   `rule sqlmap
 {
     meta:
@@ -184,22 +176,6 @@ export const BUILTIN_SOURCES: string[] = [
         $calls  = /(?:eval|assert|system|passthru|shell_exec|base64_decode)(?:\\(|%28)/ nocase
     condition:
         any of them
-}`,
-  `rule unusual_methods
-{
-    meta:
-        name = "비정상 메서드"
-        description = "GET·POST·HEAD·OPTIONS 이외의 메서드(PROPFIND, TRACE, PUT, DELETE, CONNECT 등)."
-    condition:
-        method != "GET" and method != "POST" and method != "HEAD" and method != "OPTIONS" and method is not null
-}`,
-  `rule large_responses
-{
-    meta:
-        name = "대용량 응답"
-        description = "응답 크기 10MB 이상. 데이터 유출·대량 다운로드 확인용."
-    condition:
-        bytes >= 10485760
 }`,
   `rule bots
 {

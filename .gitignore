@@ -8,3 +8,5 @@
 /apps/desktop/src-tauri/target
 .DS_Store
 /Fonts
+# 로컬 스킬 심볼릭 링크(도구별 캐시)
+/.claude

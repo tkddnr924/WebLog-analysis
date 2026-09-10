@@ -1,4 +1,5 @@
 // 표시용 순수 함수. 테스트 대상.
+import type { JobStatus } from "../types";
 
 export function formatBytes(n: number | null | undefined): string {
   if (n === null || n === undefined) return "–";
@@ -20,7 +21,6 @@ export function formatCount(n: number | null | undefined): string {
 
 /** 화면 표시·입력 시간대. 한국 시간(UTC+9)으로 고정한다. 저장은 UTC이며 여기서만 변환한다. */
 export const DISPLAY_OFFSET_SECONDS = 9 * 3600;
-export const DISPLAY_TZ_LABEL = "KST";
 
 /** UTC 마이크로초를 표시 시간대의 `YYYY-MM-DD HH:MM:SS`로. 시간이 없으면 미확정 표시. */
 export function formatTime(us: number | null | undefined): string {
@@ -58,16 +58,19 @@ export function statusClass(status: number | null): "s2" | "s3" | "s4" | "s5" | 
   return "s0";
 }
 
-export function jobStatusLabel(s: string): string {
-  const map: Record<string, string> = {
-    queued: "대기",
-    running: "실행 중",
-    completed: "완료",
-    completed_with_errors: "완료(오류 있음)",
-    cancelling: "취소 중",
-    cancelled: "취소됨",
-    failed: "실패",
-    interrupted: "중단됨(복구 가능)",
-  };
-  return map[s] ?? s;
+const JOB_STATUS_LABELS: Record<JobStatus, string> = {
+  queued: "대기",
+  running: "진행 중",
+  completed: "완료",
+  completed_with_errors: "완료(오류 있음)",
+  cancelling: "취소 중",
+  cancelled: "취소됨",
+  failed: "실패",
+  interrupted: "비정상 종료(복구 가능)",
+};
+
+/** Accepts the plain status strings that finish notices carry. */
+export function jobStatusLabel(status: JobStatus | string): string {
+  return JOB_STATUS_LABELS[status as JobStatus] ?? status;
 }
+

@@ -40,3 +40,36 @@
 ## 개발 검사
 
 - `scripts/check.sh` / `check.ps1`: pnpm(타입·린트·Vitest·빌드) + cargo fmt/clippy/test. Windows에서 PowerShell 스크립트 실행은 사용자 검증.
+
+## 코드 품질 검토 (2026-09-08)
+
+정적 검토와 기존 검사 실행으로 확인한 결함이다. 미해결 항목은 수정 전까지 알려진 제약이다. 상세 근거는 `agent/plan/plan-code-quality-review-260908.md`.
+
+| 심각도 | 결함 | 상태 | 위치 |
+|---|---|---|---|
+| 높음 | `start_import`/`resume_job`이 동기 Tauri 명령이고 첫 배치 커밋(기본 5만 행·32MB)까지 호출자를 블로킹해 그동안 UI가 정지한다 | 해결(2026-09-08) — 작업 생성 직후 진행 통지 + 명령 비동기화. 근거는 `agent/plan/plan-import-start-nonblocking-260908.md` | `crates/weblog-engine/src/importer.rs:162-169`, `apps/desktop/src-tauri/src/commands.rs:157-175` |
+| 높음 | 중단 작업 재개·활성화·결과 삭제·소스 검증 IPC가 UI에 연결되어 있지 않고, 안내 문구는 존재하지 않는 "작업 탭"을 가리킨다 | 해결(2026-09-08) — 사용자 결정으로 작업 탭을 쓰지 않는다. 탭·프런트 래퍼·해당 Tauri 명령(`resume_job`, `list_jobs`, `activate_job`, `delete_job_results`, `verify_source`)을 모두 제거하고, 안내 문구는 CLI 재개를 가리키게 고쳤다. 복구 기능 자체는 엔진·서비스와 CLI(`weblog resume`/`jobs`/`activate`/`delete-results`/`verify`)에 남는다 | `apps/desktop/src/state.tsx:115`, `apps/desktop/src/panels/ResultsPanel.tsx`, `apps/desktop/src-tauri/src/lib.rs:52-57` |
+| 중간 | 탐색 오류 목록에 상한이 없어 권한 오류가 많은 트리에서 계속 증가한다 | 해결(2026-09-08) — 오류도 `max_entries` 상한을 쓰고 `errors_truncated`로 알린다. 근거는 `agent/plan/plan-engine-limits-and-poison-260908.md` | `crates/weblog-engine/src/source/scan.rs:105-112` |
+| 중간 | 사용자 프리셋 YAML을 상한 검사 전에 전부 메모리로 읽는다 | 해결(2026-09-08) — 읽기 전에 파일 크기를 `yaml::MAX_YAML_BYTES`와 비교한다 | `crates/weblog-engine/src/format/library.rs:60-70` |
+| 중간 | `with_store`가 뮤텍스 포이즈닝을 "가져오기 진행 중"으로 잘못 보고한다 | 해결(2026-09-08) — `Poisoned`는 복구해 진행하고 `WouldBlock`만 `ImportRunning`으로 보고한다 | `crates/weblog-service/src/service.rs:803-817` |
+| 중간 | 원문 컬럼 금지 검사가 테스트에서만 호출되고 런타임 가드가 아니다 | 해결(2026-09-08) — `Store::open`/`open_in_memory`가 마이그레이션 직후 검사한다. 근거는 `agent/plan/plan-cleanup-and-guards-260908.md` | `crates/weblog-engine/src/store/mod.rs:184-186,203-204` |
+| 중간 | 렌더 예외가 나면 ErrorBoundary가 없어 화면 전체가 흰 화면이 된다(`\xHH` 이스케이프 디코드의 배열 스프레드도 스택 상한에 의존했다) | 해결(2026-09-08) — 화면 단위 ErrorBoundary 추가, 스프레드 제거. 스프레드 위험은 요청 대상 상한 64KiB 안에서는 재현되지 않아 심각도 과대평가였다. 근거는 `agent/plan/plan-render-crash-guard-260908.md` | `apps/desktop/src/panels/ErrorBoundary.tsx`, `apps/desktop/src/App.tsx:71-77`, `apps/desktop/src/lib/escapes.ts:9-37` |
+| 중간 | 통계 화면이 오래된 응답을 폐기하지 않아 룰을 빠르게 바꾸면 이전 결과가 표시될 수 있다 | 해결(2026-09-08) — 요청 순번으로 늦은 응답을 버린다 | `apps/desktop/src/panels/StatsPanel.tsx:97-128` |
+| 낮음 | 미사용 공개 API: `Store::path`, `Service::job`, `BlocksParser::pattern`, `assert_no_raw_columns`, 프런트 `joinPath`·`templatesFor`·`GROUP_LABELS`·`PRESET_LABELS`·`DISPLAY_TZ_LABEL` | 해결(2026-09-08) — `assert_no_raw_columns`는 런타임 가드로 승격, 나머지는 제거(`Service::job`은 작업 탭에서도 쓰지 않아 삭제하고 테스트는 `list_jobs` 조회로 바꿨다. 이전 표에 "작업 탭에서 사용"이라 적은 서술은 오류였다) | `store/mod.rs`, `parse/blocks.rs`, `format/compile.rs`, `weblog-service/src/service.rs`, `lib/paths.ts`, `lib/puzzle.ts`, `lib/format.ts` |
+| 낮음 | 중복 로직: ID 생성 `MAX+1` 3곳, 상태 집계 SQL 2곳, 바이트 단위 표기 KiB/KB 불일치 | 해결(2026-09-08) — `store::next_id` 공유 함수로 통합, 죽은 `status_histogram` 경로(엔진 트레이트·서비스·명령) 제거, 바이트 표기를 KiB 계열로 통일, 중복이던 `jobStatusLabel`을 `lib/format.ts` 하나만 남겼다 | `store/mod.rs:564-572`, `store/batch.rs:161`, `store/views.rs:127`, `panels/ByteValue.tsx:4`, `lib/format.ts:62-76` |
+| 낮음 | 조건 값 오류 메시지에 사용자 입력값을 포함한다 | 해결(2026-09-08) — 컬럼 이름만 남기고 입력값을 뺐다 | `crates/weblog-engine/src/store/query.rs:225` |
+
+검사 결과(2026-09-08, 수정 후 재실행): `cargo clippy --workspace --all-targets --locked -- -D warnings` 경고 0, `cargo fmt --all -- --check` 통과, `cargo test --workspace --locked` 156개 통과, `pnpm typecheck`·`pnpm build` 통과, Vitest 46개 통과. Vitest 수가 줄어든 것은 삭제한 함수(`joinPath`, `templatesFor`)와 작업 탭(`lib/jobs.ts`) 테스트를 함께 지웠기 때문이다. `pnpm lint` 경고 1건은 그대로다(`QueryPanel.tsx:136` TanStack Virtual의 `useVirtualizer`는 메모이제이션할 수 없다는 `react-hooks/incompatible-library` 경고).
+
+## 가져오기 처리량 개선 (2026-09-09)
+
+파싱 줄당 할당 제거 → 파싱·커밋 파이프라인 → 배치 기본값 상향의 3단계로 같은 입력 기준 23.82s → 12.28s(252k → 489k줄/초)로 줄였다. 수치와 설정별 비교는 `docs/benchmarks.md`의 "가져오기 처리량 개선", 작업 기록은 `agent/plan/plan-import-throughput-260909.md`.
+
+| 항목 | 상태 | 근거 |
+|---|---|---|
+| 저장 결과 동일성 | 재현 | 개선 전 DB와 개선 후 DB(플레인·gzip)의 `weblog analyze --top-n 20` 출력이 완전히 일치. 레코드 5,964,046 / 오류 30,009 / 제외 5,945 동일 |
+| 재개·중복 없음·취소 | 자동 | `tests/recovery.rs` 13개. 파이프라인 때문에 취소·강제 종료 시점의 확정 배치가 1~2개 많아질 수 있어 "정확히 N행" 단언을 배치 경계·범위 단언으로 바꿨다 |
+| 메모리 | 재현 | 피크 RSS 985MiB → 640MiB(기본 설정). 배치 200,000행은 10.74s로 더 빠르지만 1,309MiB를 써서 기본값으로 삼지 않았다 |
+| Windows·HDD | 미검증 | 측정은 Mac SSD 기준. HDD에서는 커밋 비중이 더 커질 수 있다 |
+
+검사 결과(2026-09-09): `cargo test --workspace --locked` 156개 통과(연속 2회), `cargo clippy --workspace --all-targets --locked -- -D warnings` 경고 0, `cargo fmt --all -- --check` 통과. 프런트엔드는 변경이 없어 재검사하지 않았다.

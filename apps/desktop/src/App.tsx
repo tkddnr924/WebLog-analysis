@@ -1,10 +1,13 @@
 import { useEffect } from "react";
 import { api, errorText } from "./api";
-import { AppStateProvider, useAppState } from "./state";
+import { AppStateProvider, useAppState, type Stage } from "./state";
 import { StartPanel } from "./panels/StartPanel";
 import { ImportingPanel } from "./panels/ImportingPanel";
 import { ResultsPanel } from "./panels/ResultsPanel";
+import { ErrorBoundary } from "./panels/ErrorBoundary";
 import { formatBytes, formatCount } from "./lib/format";
+
+const STAGE_LABELS: Record<Stage, string> = { start: "시작 화면", importing: "파싱 화면", results: "결과 화면" };
 
 export function App() {
   return (
@@ -68,9 +71,11 @@ function Shell() {
         </div>
       )}
       <main className="panel">
-        {stage === "start" && <StartPanel />}
-        {stage === "importing" && <ImportingPanel />}
-        {stage === "results" && <ResultsPanel />}
+        <ErrorBoundary label={STAGE_LABELS[stage]} resetKey={stage}>
+          {stage === "start" && <StartPanel />}
+          {stage === "importing" && <ImportingPanel />}
+          {stage === "results" && <ResultsPanel />}
+        </ErrorBoundary>
       </main>
     </div>
   );

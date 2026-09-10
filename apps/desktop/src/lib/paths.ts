@@ -4,13 +4,6 @@ function separatorOf(path: string): string {
   return path.includes("\\") && !path.includes("/") ? "\\" : "/";
 }
 
-/** 루트 경로 아래에 파일 이름을 붙인다. 루트의 구분자 종류를 따른다. */
-export function joinPath(root: string, name: string): string {
-  if (root === "") return name;
-  if (root.endsWith("/") || root.endsWith("\\")) return root + name;
-  return root + separatorOf(root) + name;
-}
-
 /** 루트 아래 경로를 루트 기준 상대 경로로. 루트 밖이면 원래 경로를 돌려준다. */
 export function relativeTo(root: string, path: string): string {
   if (root === "") return path;

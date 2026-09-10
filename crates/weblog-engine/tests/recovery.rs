@@ -122,8 +122,8 @@ fn crash_after_commit_then_resume_has_no_duplicates_or_gaps_plain() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("a.log");
     let db = dir.path().join("a.duckdb");
-    write_lines(&log, 25, false);
-    import_and_crash(&db, vec![log.clone()], 4, 3);
+    write_lines(&log, 2000, false);
+    import_and_crash(&db, vec![log.clone()], 100, 3);
 
     let mut store = Store::open(&db, &StoreConfig::default()).unwrap();
     let job_id = store.latest_job_id().unwrap().unwrap();
@@ -132,20 +132,25 @@ fn crash_after_commit_then_resume_has_no_duplicates_or_gaps_plain() {
         JobStatus::Interrupted,
         "open must mark stale running jobs"
     );
-    assert_eq!(store.job(job_id).unwrap().committed_records, 12);
+    // 파싱이 쓰기보다 앞서므로 죽는 시점의 확정 배치 수는 3 이상이다. 배치 경계는 유지된다.
+    let committed = store.job(job_id).unwrap().committed_records as u64;
+    assert!(
+        (300..2000).contains(&committed) && committed % 100 == 0,
+        "committed at crash: {committed}"
+    );
 
     let summary = resume_import(
         &mut store,
         job_id,
-        &cfg(4),
+        &cfg(100),
         &AtomicBool::new(false),
         &mut |_| {},
     )
     .unwrap();
     assert!(summary.resumed);
-    assert_eq!(summary.sources[0].resumed_from_line, 13);
-    assert_eq!(summary.sources[0].records, 13);
-    assert_complete_without_duplicates(&store, job_id, 25);
+    assert_eq!(summary.sources[0].resumed_from_line, committed + 1);
+    assert_eq!(summary.sources[0].records, 2000 - committed);
+    assert_complete_without_duplicates(&store, job_id, 2000);
 }
 
 #[test]
@@ -153,21 +158,26 @@ fn crash_then_resume_works_for_gzip_by_replaying_the_stream() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("a.log.gz");
     let db = dir.path().join("a.duckdb");
-    write_lines(&log, 40, true);
-    import_and_crash(&db, vec![log.clone()], 7, 2);
+    write_lines(&log, 2000, true);
+    import_and_crash(&db, vec![log.clone()], 100, 2);
 
     let mut store = Store::open(&db, &StoreConfig::default()).unwrap();
     let job_id = store.latest_job_id().unwrap().unwrap();
+    let committed = store.job(job_id).unwrap().committed_records as u64;
+    assert!(
+        (200..2000).contains(&committed) && committed % 100 == 0,
+        "committed at crash: {committed}"
+    );
     let summary = resume_import(
         &mut store,
         job_id,
-        &cfg(7),
+        &cfg(100),
         &AtomicBool::new(false),
         &mut |_| {},
     )
     .unwrap();
-    assert_eq!(summary.sources[0].resumed_from_line, 15);
-    assert_complete_without_duplicates(&store, job_id, 40);
+    assert_eq!(summary.sources[0].resumed_from_line, committed + 1);
+    assert_complete_without_duplicates(&store, job_id, 2000);
 }
 
 #[test]
@@ -242,7 +252,7 @@ fn resume_refuses_when_file_changed_since_checkpoint() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("a.log");
     let db = dir.path().join("a.duckdb");
-    write_lines(&log, 10, false);
+    write_lines(&log, 2000, false);
     import_and_crash(&db, vec![log.clone()], 4, 1);
     // 선두 내용을 바꾼다(크기는 유지).
     let mut bytes = std::fs::read(&log).unwrap();
@@ -262,7 +272,11 @@ fn resume_refuses_when_file_changed_since_checkpoint() {
     assert!(matches!(err, EngineError::SourceChanged { .. }), "{err}");
     let job = store.job(job_id).unwrap();
     assert_eq!(job.status, JobStatus::Failed);
-    assert_eq!(job.committed_records, 4, "committed batch survives");
+    assert!(
+        (4..2000).contains(&job.committed_records) && job.committed_records % 4 == 0,
+        "committed batches survive: {}",
+        job.committed_records
+    );
     assert!(job.failure_reason.unwrap().contains("선두 내용 해시"));
 }
 
@@ -369,7 +383,7 @@ fn cancelled_job_can_be_resumed_to_completion() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("a.log");
     let db = dir.path().join("a.duckdb");
-    write_lines(&log, 20, false);
+    write_lines(&log, 2000, false);
     let mut store = Store::open(&db, &StoreConfig::default()).unwrap();
     let cancel = AtomicBool::new(false);
     let s = run_import(
@@ -385,7 +399,11 @@ fn cancelled_job_can_be_resumed_to_completion() {
     )
     .unwrap();
     assert_eq!(s.status, "cancelled");
-    assert_eq!(s.records, 10);
+    assert!(
+        (10..2000).contains(&s.records) && s.records % 5 == 0,
+        "cancel keeps whole batches and stops early: {}",
+        s.records
+    );
     let summary = resume_import(
         &mut store,
         s.job_id,
@@ -394,8 +412,8 @@ fn cancelled_job_can_be_resumed_to_completion() {
         &mut |_| {},
     )
     .unwrap();
-    assert_eq!(summary.sources[0].resumed_from_line, 11);
-    assert_complete_without_duplicates(&store, s.job_id, 20);
+    assert_eq!(summary.sources[0].resumed_from_line, s.records + 1);
+    assert_complete_without_duplicates(&store, s.job_id, 2000);
 }
 
 #[test]
@@ -461,13 +479,16 @@ fn reader_on_another_thread_queries_while_import_runs_and_cursor_stays_frozen() 
     .unwrap();
     done_tx.send(()).unwrap();
     let (frozen_batch, visible_then, rows_via_cursor, total_after) = query_thread.join().unwrap();
-    assert_eq!(frozen_batch, 1);
+    // 파싱이 쓰기보다 앞서므로 멈춘 시점의 확정 배치 수는 1 이상이다. 읽는 쪽은 그 시점까지만 본다.
+    assert!((1..6).contains(&frozen_batch), "frozen at {frozen_batch}");
+    let visible_rows = frozen_batch * 500;
     assert_eq!(
-        visible_then, 500,
-        "reader sees only the committed batch during import"
+        visible_then, visible_rows,
+        "reader sees only committed batches during import"
     );
     assert_eq!(
-        rows_via_cursor, 500,
+        i64::try_from(rows_via_cursor).unwrap(),
+        visible_rows,
         "cursor stays frozen at the batch range it was created with"
     );
     assert_eq!(total_after, 3000);

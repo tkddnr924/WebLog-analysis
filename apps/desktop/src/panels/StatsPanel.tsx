@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { useAppState } from "../state";
 import { DISPLAY_OFFSET_SECONDS, formatCount, formatTime, parseTimeInput } from "../lib/format";
@@ -94,6 +94,8 @@ export function StatsPanel() {
   const [topN, setTopN] = useState(20);
   const [stats, setStats] = useState<StatsResult | null>(null);
   const [loading, setLoading] = useState(false);
+  // Only the newest request may write results; late answers to older conditions are dropped.
+  const requestRef = useRef(0);
 
   const run = useCallback(async () => {
     const f = parseTimeInput(from);
@@ -102,22 +104,25 @@ export function StatsPanel() {
       setNotice("시각은 YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM 형식(한국 시간)으로 입력하세요.");
       return;
     }
+    requestRef.current += 1;
+    const id = requestRef.current;
     setLoading(true);
     try {
-      setStats(
-        await api.computeStats({
-          // 사이드바 룰의 조건(상태·메서드·IP·경로) 위에 이 화면의 시간·작업·활성 조건을 얹는다.
-          filter: { ...(ruleRequest?.filter ?? emptyFilter()), time_from_micros: f, time_to_micros: t, active_only: activeOnly },
-          top_n: topN,
-          bucket: "auto",
-          tz_offset_seconds: DISPLAY_OFFSET_SECONDS,
-        }),
-      );
+      const result = await api.computeStats({
+        // 사이드바 룰의 조건(상태·메서드·IP·경로) 위에 이 화면의 시간·작업·활성 조건을 얹는다.
+        filter: { ...(ruleRequest?.filter ?? emptyFilter()), time_from_micros: f, time_to_micros: t, active_only: activeOnly },
+        top_n: topN,
+        bucket: "auto",
+        tz_offset_seconds: DISPLAY_OFFSET_SECONDS,
+      });
+      if (id !== requestRef.current) return;
+      setStats(result);
       setNotice(null);
     } catch (e) {
+      if (id !== requestRef.current) return;
       setNotice(errorText(e));
     } finally {
-      setLoading(false);
+      if (id === requestRef.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to, activeOnly, topN, ruleRequest?.nonce, setNotice]);

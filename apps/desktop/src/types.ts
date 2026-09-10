@@ -70,6 +70,7 @@ export interface ScanResponse {
   files: ScannedFile[];
   errors: { path: string; message: string }[];
   truncated: boolean;
+  errors_truncated: boolean;
   directories_visited: number;
   filtered_out: number;
 }

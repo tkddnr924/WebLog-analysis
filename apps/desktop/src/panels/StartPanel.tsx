@@ -39,27 +39,9 @@ const SAMPLE_LINES = 8;
 
 /** 서버 힌트·로그 종류에 맞는 기본 포함 패턴. 후보 선정용이며 포맷은 내용으로 판별한다. */
 export function defaultInclude(server: ServerHint, kind: LogKind = "access"): string {
-  if (kind === "error") {
-    switch (server) {
-      case "iis":
-        return "httperr*.log";
-      case "apache":
-        return "error*.log*, error_log*";
-      case "nginx":
-        return "error*.log*";
-      default:
-        return "*error*.log*, error_log*";
-    }
-  }
-  switch (server) {
-    case "iis":
-      return "u_ex*.log, *.log";
-    case "apache":
-    case "nginx":
-      return "access*.log*, access_log*";
-    default:
-      return "*.log*";
-  }
+  // IIS names files by date, not by log kind.
+  if (server === "iis") return kind === "error" ? "httperr*.log" : "u_ex*.log, *.log";
+  return kind === "error" ? "*error*.log*" : "*access*.log*, *access_log*";
 }
 
 const KINDS: { id: LogKind; label: string }[] = [
@@ -476,7 +458,9 @@ export function StartPanel() {
           </div>
           {scan.errors.length > 0 && (
             <details className="issues">
-              <summary>읽지 못한 항목 {scan.errors.length}개</summary>
+              <summary>
+                읽지 못한 항목 {scan.errors.length}개{scan.errors_truncated && " (상한에 걸려 일부만 표시)"}
+              </summary>
               <ul>
                 {scan.errors.map((e) => (
                   <li key={e.path}>

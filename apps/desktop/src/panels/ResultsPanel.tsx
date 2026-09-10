@@ -1,4 +1,4 @@
-// 결과 화면: 조회·통계·작업 탭. 실제 분석 작업은 여기서 한다.
+// 결과 화면: 조회·통계 탭. 실제 분석 작업은 여기서 한다.
 import { useState } from "react";
 import { QueryPanel } from "./QueryPanel";
 import { StatsPanel } from "./StatsPanel";

@@ -20,7 +20,7 @@ pub struct ScanOptions {
     pub exclude: Vec<String>,
     /// 심볼릭 링크 추적.
     pub follow_symlinks: bool,
-    /// 최대 항목 수. 넘으면 `truncated`로 표시하고 중단한다.
+    /// 최대 항목 수. 넘으면 `truncated`로 표시하고 중단한다. 오류 목록에도 같은 상한을 쓴다.
     pub max_entries: usize,
 }
 
@@ -70,6 +70,9 @@ pub struct ScanResult {
     pub errors: Vec<ScanError>,
     /// 최대 항목 수에 걸려 중단됐는지.
     pub truncated: bool,
+    /// 오류 목록이 상한에 걸려 일부만 담겼는지. 탐색 자체는 계속한다.
+    #[serde(default)]
+    pub errors_truncated: bool,
     /// 살펴본 디렉터리 수.
     pub directories_visited: usize,
     /// 패턴에 걸러진 파일 수.
@@ -99,16 +102,22 @@ fn name_selected(name: &str, opts: &ScanOptions) -> bool {
     opts.include.is_empty() || opts.include.iter().any(|p| wildcard_match(p, name))
 }
 
+/// Records an item error, capped by `max_entries`. Scanning continues past the cap.
+fn push_error(result: &mut ScanResult, opts: &ScanOptions, path: PathBuf, message: String) {
+    if result.errors.len() >= opts.max_entries {
+        result.errors_truncated = true;
+        return;
+    }
+    result.errors.push(ScanError { path, message });
+}
+
 /// 루트 아래를 탐색한다. 루트가 파일이면 그 파일 하나를 검사한다.
 pub fn scan_directory(root: &Path, opts: &ScanOptions) -> ScanResult {
     let mut result = ScanResult::default();
     let root_meta = match std::fs::symlink_metadata(root) {
         Ok(m) => m,
         Err(e) => {
-            result.errors.push(ScanError {
-                path: root.to_path_buf(),
-                message: e.to_string(),
-            });
+            push_error(&mut result, opts, root.to_path_buf(), e.to_string());
             return result;
         }
     };
@@ -125,10 +134,7 @@ pub fn scan_directory(root: &Path, opts: &ScanOptions) -> ScanResult {
         let read = match std::fs::read_dir(&dir) {
             Ok(r) => r,
             Err(e) => {
-                result.errors.push(ScanError {
-                    path: dir.clone(),
-                    message: e.to_string(),
-                });
+                push_error(&mut result, opts, dir.clone(), e.to_string());
                 continue;
             }
         };
@@ -136,10 +142,7 @@ pub fn scan_directory(root: &Path, opts: &ScanOptions) -> ScanResult {
         for entry in read {
             match entry {
                 Ok(e) => children.push(e.path()),
-                Err(e) => result.errors.push(ScanError {
-                    path: dir.clone(),
-                    message: e.to_string(),
-                }),
+                Err(e) => push_error(&mut result, opts, dir.clone(), e.to_string()),
             }
         }
         // 스택은 LIFO이므로 역순으로 넣어 정렬된 순서로 방문한다.
@@ -148,10 +151,7 @@ pub fn scan_directory(root: &Path, opts: &ScanOptions) -> ScanResult {
             let meta = match std::fs::symlink_metadata(&child) {
                 Ok(m) => m,
                 Err(e) => {
-                    result.errors.push(ScanError {
-                        path: child.clone(),
-                        message: e.to_string(),
-                    });
+                    push_error(&mut result, opts, child.clone(), e.to_string());
                     continue;
                 }
             };
@@ -163,10 +163,7 @@ pub fn scan_directory(root: &Path, opts: &ScanOptions) -> ScanResult {
                 match std::fs::metadata(&child) {
                     Ok(m) => (m.is_dir(), m.is_file()),
                     Err(e) => {
-                        result.errors.push(ScanError {
-                            path: child.clone(),
-                            message: e.to_string(),
-                        });
+                        push_error(&mut result, opts, child.clone(), e.to_string());
                         continue;
                     }
                 }
@@ -203,20 +200,14 @@ fn push_file(path: &Path, depth: usize, opts: &ScanOptions, result: &mut ScanRes
     let stat = match StatSnapshot::read(path) {
         Ok(s) => s,
         Err(e) => {
-            result.errors.push(ScanError {
-                path: path.to_path_buf(),
-                message: e.to_string(),
-            });
+            push_error(result, opts, path.to_path_buf(), e.to_string());
             return;
         }
     };
     let compression = match Compression::detect(path) {
         Ok(c) => Some(c),
         Err(e) => {
-            result.errors.push(ScanError {
-                path: path.to_path_buf(),
-                message: e.to_string(),
-            });
+            push_error(result, opts, path.to_path_buf(), e.to_string());
             None
         }
     };
@@ -367,6 +358,38 @@ mod tests {
         assert!(names(&follow, dir.path())
             .iter()
             .any(|n| n.starts_with("link/")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_errors_stop_at_the_entry_limit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..6 {
+            let sub = dir.path().join(format!("d{i}"));
+            std::fs::create_dir(&sub).unwrap();
+            std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let opts = ScanOptions {
+            max_entries: 2,
+            ..ScanOptions::default()
+        };
+        let r = scan_directory(dir.path(), &opts);
+        assert!(
+            r.errors.len() <= opts.max_entries,
+            "오류 목록도 상한을 지켜야 함: {}",
+            r.errors.len()
+        );
+        assert!(r.errors_truncated, "상한에 걸렸음을 알려야 함");
+        assert!(!r.truncated, "항목 상한에는 걸리지 않았다");
+        assert_eq!(
+            r.directories_visited, 7,
+            "오류가 상한을 넘어도 탐색은 계속한다"
+        );
+        for i in 0..6 {
+            let sub = dir.path().join(format!("d{i}"));
+            std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
     }
 
     #[test]

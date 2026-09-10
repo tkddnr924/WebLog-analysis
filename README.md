@@ -1,6 +1,6 @@
 # WebLog-analysis
 
-대용량 웹 서버 접근 로그(Apache/Nginx, IIS W3C, 커스텀 단일행)를 파싱해 DuckDB에 저장하고 조회하는 데스크톱 도구. 5단계까지 구현되어 있다(파서·저장·조회 엔진, 탐색·판별·복구, Tauri/React 화면, 퍼즐식 포맷 확인, 통계·저장된 뷰·스트리밍 내보내기). 시나리오별 검증 상태는 [docs/verification.md](docs/verification.md)에 있다. 설계·규칙은 [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md), [docs/](docs/)를 따른다.
+대용량 웹 서버 접근 로그(Apache/Nginx, IIS W3C, 커스텀 단일행)를 파싱해 DuckDB에 저장하고 조회하는 데스크톱 도구. 5단계까지 구현되어 있다(파서·저장·조회 엔진, 탐색·판별·복구, Tauri/React 화면, 퍼즐식 포맷 확인, 통계·저장된 뷰·스트리밍 내보내기). 시나리오별 검증 상태는 [docs/verification.md](docs/verification.md)에 있다. 설계·규칙은 [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md), [프로젝트 위키](docs/README.md)를 따른다.
 
 ## 구성
 
@@ -64,11 +64,13 @@ pnpm tauri build      # 배포 번들(Windows: NSIS/MSI, macOS: DMG)
        status in 200..299 and any of them
    }
    ```
-   필드는 status·bytes·method·ip·path·protocol·referrer·ua, 연산은 `== != > >= < <=`, `in a..b`, `contains/icontains/startswith/endswith/matches`, `is null`, `and/or/not`, `any of them`, `all of ($a*)`. `$id`만 쓰면 path에 적용된다. 파서는 엔진의 조건식(`LogFilter.expr`: and/or/not/cond 트리, RE2 정규식은 바인딩 전 검증)으로 컴파일한다. 기본 룰 11개(전체, 정상 응답, SQL Injection, XSS, 경로 탐색, 명령 주입, 스캐너 경로, SQL Injection·성공 응답, 서버 오류, 404, 봇 UA)는 내장 원문이며 ✎로 열어 보고 복사본으로 저장할 수 있다. "+"는 큰 편집기(줄 번호, 실시간 파싱 오류 위치, 문법 안내)를 열고, 사용자 룰은 저장된 뷰에 원문과 함께 저장된다. 룰을 고르면 조회·통계가 바로 그 조건으로 돌고, 조회 막대에는 기간·빠른 검색(경로·IP·리퍼러·UA)·정렬만 남는다.
+   필드는 status·bytes·method·ip·path·protocol·referrer·ua, 연산은 `== != > >= < <=`, `in a..b`, `contains/icontains/startswith/endswith/matches`, `is null`, `and/or/not`, `any of them`, `all of ($a*)`. `$id`만 쓰면 path에 적용된다. 파서는 엔진의 조건식(`LogFilter.expr`: and/or/not/cond 트리, RE2 정규식은 바인딩 전 검증)으로 컴파일한다. 기본 룰 15개(북마크, 전체 요청, 정상 응답, SQL Injection, XSS, 경로 탐색, 명령 주입, 취약점 스캐너 경로, SQL Injection·성공 응답, sqlmap, 스캐너 도구 UA, Log4Shell, 파일 포함·SSRF, 웹셸 업로드·실행, 봇·스크립트 UA)는 내장 원문이며 ✎로 열어 보고 복사본으로 저장할 수 있다. "+"는 큰 편집기(줄 번호, 실시간 파싱 오류 위치, 문법 안내)를 열고, 사용자 룰은 저장된 뷰에 원문과 함께 저장된다. 룰을 고르면 조회·통계가 바로 그 조건으로 돌고, 조회 막대에는 기간·빠른 검색(경로·IP·리퍼러·UA)·정렬만 남는다.
    - 조회: 룰 조건 + 기간(한국 시간)·빠른 검색·정렬. 가상 스크롤 표, 커서 기반 추가 로드, UI 캐시 8MiB 상한, 전체 건수는 별도 버튼. 행을 고르면 구조화 필드와 "재구성 로그"를 오른쪽에 보여준다. 조건은 사이드바 "+"로 룰(저장된 뷰)로 남길 수 있고, 현재 조건을 CSV/JSON Lines로 스트리밍 내보낸다(백그라운드, 취소 가능).
    - 통계: 조건 안의 시간별 요청 수, 상태코드·메서드 분포, 상위 N IP·요청 대상. 전체를 훑는 무거운 조회라 실행 중 중단할 수 있다.
 
 포맷 확인용 원문 샘플(`sample_lines` 명령, 최대 20줄·256KiB)은 화면에만 잠시 보여주며 저장하지 않는다.
+
+상한: 탐색은 파일 항목과 오류 목록에 각각 같은 상한(`max_entries`, 기본 10만)을 쓰고, 넘으면 `truncated`·`errors_truncated`로 알린다(오류 상한에 걸려도 탐색은 계속한다). 사용자 프리셋 YAML은 읽기 전에 파일 크기를 256KiB 상한과 비교해 거부한다.
 
 IPC 규약: 명령 인자와 구조체 필드는 모두 snake_case로 고정한다(`#[tauri::command(rename_all = "snake_case")]`, `#[serde(rename_all = "snake_case")]`). 진행 이벤트는 `weblog://import`로 250ms 이상 간격으로 보내고, UI는 2초 폴링으로 이벤트 유실을 보완한다. 권한은 `src-tauri/capabilities/default.json`에서 핵심 IPC, 이벤트 수신, 파일/폴더 선택 대화상자만 허용한다.
 
@@ -141,7 +143,7 @@ $B verify --db bench-data/a.duckdb --source 1 --full [--relink /new/path/a.log]
 | 사용자 프리셋 | 앱 설정 폴더의 `presets/<이름>.yaml` (Windows: `%APPDATA%\com.vislougue.weblog\presets`) |
 | 케이스 DB | 앱 데이터 폴더의 `cases/<로그 폴더 이름>-<YYYYMMDD-HHMMSS>.duckdb` (Windows: `%APPDATA%\com.vislougue.weblog\cases`) |
 | 내보내기 | 사용자가 고른 경로. 부분 결과(취소)도 파일로 남고 화면에 표시된다 |
-| 복구 | 앱을 다시 열면 중단된 작업이 "중단됨(복구 가능)"으로 표시되고 3단계에서 재개한다 |
+| 복구 | 앱을 다시 열면 중단된 작업을 알림으로 알려 준다. 재개·활성화·결과 삭제·소스 검증은 CLI(`weblog resume` / `jobs` / `activate` / `delete-results` / `verify`)로 한다 |
 
 ## 저장 위치와 보존 정책
 

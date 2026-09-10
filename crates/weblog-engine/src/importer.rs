@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -33,8 +34,8 @@ pub struct ImportConfig {
 impl Default for ImportConfig {
     fn default() -> Self {
         Self {
-            batch_max_rows: 50_000,
-            batch_max_bytes: 32 * 1024 * 1024,
+            batch_max_rows: 100_000,
+            batch_max_bytes: 48 * 1024 * 1024,
             max_line_bytes: 64 * 1024,
             max_errors_per_batch: 100_000,
             full_verify_on_resume: false,
@@ -107,7 +108,8 @@ pub struct ImportSummary {
     pub commit_secs: f64,
 }
 
-/// 진행 이벤트. 배치 커밋마다 한 번 보낸다.
+/// Progress event. A new job reports once right after creation (zero counts), then once per committed batch.
+/// The first report precedes any commit, so callers learn `job_id` without waiting for a large batch.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Progress {
     /// 작업 ID.
@@ -158,6 +160,14 @@ pub fn run_import(
     }
     let source_ids: Vec<i64> = tasks.iter().map(|t| t.source_id).collect();
     let job = store.create_job(profile_id, &source_ids, req.replaces_job_id)?;
+    // Report the job id without waiting for the first batch commit.
+    on_progress(&Progress {
+        job_id: job.job_id,
+        source_id: source_ids.first().copied().unwrap_or(0),
+        lines_read: 0,
+        committed_records: 0,
+        committed_batches: 0,
+    });
     run_job(
         store,
         job.job_id,
@@ -294,6 +304,8 @@ fn run_job(
     })
 }
 
+/// Reads and parses one file while a writer thread commits finished batches.
+/// The queue holds one batch, so reading/parsing overlaps the DuckDB transaction.
 #[allow(clippy::too_many_arguments)]
 fn import_source(
     store: &mut Store,
@@ -350,102 +362,163 @@ fn import_source(
         elapsed_secs: 0.0,
     };
     let mut cancelled = false;
+    let mut parse_error: Option<EngineError> = None;
+    let (batch_tx, batch_rx) = mpsc::sync_channel::<PendingBatch>(1);
+    let (report_tx, report_rx) = mpsc::channel::<CommitReport>();
 
-    loop {
-        if cancel.load(Ordering::Relaxed) {
-            store.set_job_status(job_id, JobStatus::Cancelling)?;
-            cancelled = true;
-            break;
-        }
-        let parse_started = Instant::now();
-        let Some(line) = reader.next_line()? else {
-            timers.parse += parse_started.elapsed();
-            break;
-        };
-        totals.lines_read += 1;
-        let line_bytes = line.next_offset - line.start_offset;
-        totals.logical_bytes += line_bytes;
-        batch.next_offset = line.next_offset;
-        batch.end_line = line.line_number;
-        batch.approx_bytes += usize::try_from(line_bytes).unwrap_or(usize::MAX / 4);
-        match line.content {
-            LineContent::Text(text) => match parser.parse_line(line.line_number, text) {
-                LineOutcome::Record(rec) => {
-                    batch.approx_bytes += rec.approx_bytes();
-                    batch.records.push(rec);
+    let joined = std::thread::scope(|scope| {
+        let writer_store: &mut Store = &mut *store;
+        let writer = scope.spawn(move || writer_loop(writer_store, batch_rx, report_tx));
+        let mut segment = Instant::now();
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                cancelled = true;
+                break;
+            }
+            let line = match reader.next_line() {
+                Ok(Some(line)) => line,
+                Ok(None) => break,
+                Err(e) => {
+                    parse_error = Some(e);
+                    break;
                 }
-                LineOutcome::Error {
-                    line_number,
-                    code,
-                    field,
-                } => {
-                    batch.errors.push(BatchError {
+            };
+            totals.lines_read += 1;
+            let line_bytes = line.next_offset - line.start_offset;
+            totals.logical_bytes += line_bytes;
+            batch.next_offset = line.next_offset;
+            batch.end_line = line.line_number;
+            batch.approx_bytes += usize::try_from(line_bytes).unwrap_or(usize::MAX / 4);
+            match line.content {
+                LineContent::Text(text) => match parser.parse_line(line.line_number, text) {
+                    LineOutcome::Record(rec) => {
+                        batch.approx_bytes += rec.approx_bytes();
+                        batch.records.push(rec);
+                    }
+                    LineOutcome::Error {
                         line_number,
                         code,
                         field,
-                    });
+                    } => {
+                        batch.errors.push(BatchError {
+                            line_number,
+                            code,
+                            field,
+                        });
+                    }
+                    LineOutcome::Skipped { .. } => batch.skipped_count += 1,
+                },
+                LineContent::InvalidUtf8 => batch.errors.push(BatchError {
+                    line_number: line.line_number,
+                    code: ParseErrorCode::InvalidUtf8,
+                    field: None,
+                }),
+                LineContent::TooLong => batch.errors.push(BatchError {
+                    line_number: line.line_number,
+                    code: ParseErrorCode::LineTooLong,
+                    field: None,
+                }),
+            }
+            if batch.errors.len() > cfg.max_errors_per_batch {
+                parse_error = Some(EngineError::ErrorLimit {
+                    count: batch.errors.len(),
+                    limit: cfg.max_errors_per_batch,
+                });
+                break;
+            }
+            if batch.processed_lines() as usize >= cfg.batch_max_rows
+                || batch.approx_bytes >= cfg.batch_max_bytes
+            {
+                timers.parse += segment.elapsed();
+                // Report earlier batches first: the caller may cancel before this one is queued.
+                drain_reports(
+                    &report_rx,
+                    job_id,
+                    &mut totals,
+                    committed_records,
+                    committed_batches,
+                    on_progress,
+                    false,
+                );
+                let full = std::mem::replace(
+                    &mut batch,
+                    new_batch(
+                        job_id,
+                        source_id,
+                        batch_seq + 1,
+                        reader.offset(),
+                        reader.line_number() + 1,
+                    ),
+                );
+                batch_seq += 1;
+                if let Err(e) = queue(full, path, source_id, stat_at_start, &mut parser, &batch_tx)
+                {
+                    parse_error = e;
+                    break;
                 }
-                LineOutcome::Skipped { .. } => batch.skipped_count += 1,
-            },
-            LineContent::InvalidUtf8 => batch.errors.push(BatchError {
-                line_number: line.line_number,
-                code: ParseErrorCode::InvalidUtf8,
-                field: None,
-            }),
-            LineContent::TooLong => batch.errors.push(BatchError {
-                line_number: line.line_number,
-                code: ParseErrorCode::LineTooLong,
-                field: None,
-            }),
+                // Sending may block on the queue; reports that landed meanwhile go out now.
+                drain_reports(
+                    &report_rx,
+                    job_id,
+                    &mut totals,
+                    committed_records,
+                    committed_batches,
+                    on_progress,
+                    false,
+                );
+                segment = Instant::now();
+            }
         }
-        timers.parse += parse_started.elapsed();
-        if batch.errors.len() > cfg.max_errors_per_batch {
-            return Err(EngineError::ErrorLimit {
-                count: batch.errors.len(),
-                limit: cfg.max_errors_per_batch,
-            });
+        if parse_error.is_none() {
+            timers.parse += segment.elapsed();
+            if !batch.is_empty() {
+                let last = std::mem::take(&mut batch);
+                if let Err(e) = queue(last, path, source_id, stat_at_start, &mut parser, &batch_tx)
+                {
+                    parse_error = e;
+                }
+            }
         }
-        if batch.processed_lines() as usize >= cfg.batch_max_rows
-            || batch.approx_bytes >= cfg.batch_max_bytes
-        {
-            ensure_unchanged(path, source_id, stat_at_start)?;
-            batch.header_state_json = parser.header_state_json()?;
-            commit(
-                store,
-                &batch,
-                timers,
-                &mut totals,
-                committed_records,
-                committed_batches,
-                reader.line_number(),
-                on_progress,
-            )?;
-            batch_seq += 1;
-            batch = new_batch(
-                job_id,
-                source_id,
-                batch_seq,
-                reader.offset(),
-                reader.line_number() + 1,
-            );
-        }
+        drop(batch_tx);
+        writer.join()
+    });
+
+    let (commit_time, writer_result) =
+        joined.map_err(|_| EngineError::Job("배치 쓰기 스레드가 비정상 종료됨".to_owned()))?;
+    timers.commit += commit_time;
+    drain_reports(
+        &report_rx,
+        job_id,
+        &mut totals,
+        committed_records,
+        committed_batches,
+        on_progress,
+        true,
+    );
+    writer_result?;
+    if let Some(e) = parse_error {
+        return Err(e);
     }
-    if !batch.is_empty() {
-        ensure_unchanged(path, source_id, stat_at_start)?;
-        batch.header_state_json = parser.header_state_json()?;
-        commit(
-            store,
-            &batch,
-            timers,
-            &mut totals,
-            committed_records,
-            committed_batches,
-            reader.line_number(),
-            on_progress,
-        )?;
+    if cancelled {
+        store.set_job_status(job_id, JobStatus::Cancelling)?;
     }
     totals.elapsed_secs = started.elapsed().as_secs_f64();
     Ok((totals, cancelled))
+}
+
+/// Finishes a batch (file-changed check, header state) and hands it to the writer thread.
+/// `Err(None)` means the writer already stopped; its own error is reported on join.
+fn queue(
+    mut batch: PendingBatch,
+    path: &Path,
+    source_id: i64,
+    stat_at_start: StatSnapshot,
+    parser: &mut LineParser,
+    tx: &mpsc::SyncSender<PendingBatch>,
+) -> Result<(), Option<EngineError>> {
+    ensure_unchanged(path, source_id, stat_at_start).map_err(Some)?;
+    batch.header_state_json = parser.header_state_json().map_err(Some)?;
+    tx.send(batch).map_err(|_| None)
 }
 
 /// 가져오는 도중 파일이 바뀌면 배치를 커밋하지 않고 중단한다. 최초 버전은 고정된 파일을 기준으로 한다.
@@ -482,36 +555,84 @@ fn new_batch(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn commit(
+/// One committed batch, reported back to the parsing thread.
+struct CommitReport {
+    source_id: i64,
+    end_line: u64,
+    records: u64,
+    errors: u64,
+    skipped: u64,
+    /// False when the same (job, source, seq) was already committed (retry).
+    fresh: bool,
+}
+
+/// Owns the store and commits queued batches until the queue closes.
+/// Returns the accumulated commit time even when a commit fails.
+fn writer_loop(
     store: &mut Store,
-    batch: &PendingBatch,
-    timers: &mut Timers,
+    batches: mpsc::Receiver<PendingBatch>,
+    reports: mpsc::Sender<CommitReport>,
+) -> (Duration, EngineResult<()>) {
+    let mut commit_time = Duration::ZERO;
+    while let Ok(batch) = batches.recv() {
+        let started = Instant::now();
+        let outcome = store.commit_batch(&batch);
+        commit_time += started.elapsed();
+        match outcome {
+            Ok(outcome) => {
+                let report = CommitReport {
+                    source_id: batch.source_id,
+                    end_line: batch.end_line,
+                    records: batch.records.len() as u64,
+                    errors: batch.errors.len() as u64,
+                    skipped: batch.skipped_count,
+                    fresh: matches!(outcome, CommitOutcome::Committed { .. }),
+                };
+                if reports.send(report).is_err() {
+                    return (commit_time, Ok(()));
+                }
+            }
+            Err(e) => return (commit_time, Err(e)),
+        }
+    }
+    (commit_time, Ok(()))
+}
+
+/// Applies commit reports to the running totals and notifies the caller.
+/// `until_closed` blocks until the writer thread is gone; otherwise it only takes what is ready.
+#[allow(clippy::too_many_arguments)]
+fn drain_reports(
+    reports: &mpsc::Receiver<CommitReport>,
+    job_id: i64,
     totals: &mut SourceSummary,
     committed_records: &mut u64,
     committed_batches: &mut u64,
-    lines_read_total: u64,
     on_progress: &mut dyn FnMut(&Progress),
-) -> EngineResult<()> {
-    let commit_started = Instant::now();
-    let outcome = store.commit_batch(batch)?;
-    timers.commit += commit_started.elapsed();
-    if let CommitOutcome::Committed { .. } = outcome {
-        totals.records += batch.records.len() as u64;
-        totals.errors += batch.errors.len() as u64;
-        totals.skipped += batch.skipped_count;
-        totals.batches += 1;
-        *committed_records += batch.records.len() as u64;
-        *committed_batches += 1;
+    until_closed: bool,
+) {
+    loop {
+        let report = if until_closed {
+            reports.recv().ok()
+        } else {
+            reports.try_recv().ok()
+        };
+        let Some(report) = report else { return };
+        if report.fresh {
+            totals.records += report.records;
+            totals.errors += report.errors;
+            totals.skipped += report.skipped;
+            totals.batches += 1;
+            *committed_records += report.records;
+            *committed_batches += 1;
+        }
+        on_progress(&Progress {
+            job_id,
+            source_id: report.source_id,
+            lines_read: report.end_line,
+            committed_records: *committed_records,
+            committed_batches: *committed_batches,
+        });
     }
-    on_progress(&Progress {
-        job_id: batch.job_id,
-        source_id: batch.source_id,
-        lines_read: lines_read_total,
-        committed_records: *committed_records,
-        committed_batches: *committed_batches,
-    });
-    Ok(())
 }
 
 #[cfg(test)]
@@ -596,6 +717,29 @@ mod tests {
                 .unwrap(),
             2
         );
+    }
+
+    #[test]
+    fn first_progress_reports_job_id_before_any_batch_commit() {
+        let f = temp_log(&[LINE, LINE, LINE]);
+        let mut store = Store::open_in_memory(&StoreConfig::default()).unwrap();
+        let mut seen: Vec<Progress> = Vec::new();
+        let s = run_import(
+            &mut store,
+            &request(vec![f.path().to_path_buf()]),
+            &ImportConfig::default(),
+            &AtomicBool::new(false),
+            &mut |p| seen.push(*p),
+        )
+        .unwrap();
+        let first = *seen.first().expect("진행 통지가 최소 한 번은 있어야 함");
+        assert_eq!(first.job_id, s.job_id, "작업 ID는 첫 통지에서 확정된다");
+        assert_eq!(
+            (first.committed_records, first.committed_batches),
+            (0, 0),
+            "첫 통지는 배치 커밋 전에 온다"
+        );
+        assert_eq!(seen.len(), 2, "작업 생성 통지 + 마지막 배치 커밋 통지");
     }
 
     #[test]
@@ -725,7 +869,7 @@ mod tests {
 
     #[test]
     fn cancel_keeps_committed_batches_and_marks_job_cancelled() {
-        let f = temp_log(&[LINE; 10]);
+        let f = temp_log(&[LINE; 40]);
         let mut store = Store::open_in_memory(&StoreConfig::default()).unwrap();
         let cfg = ImportConfig {
             batch_max_rows: 4,
@@ -740,13 +884,15 @@ mod tests {
         })
         .unwrap();
         assert_eq!(s.status, "cancelled");
-        assert_eq!(s.records, 4);
+        // Parsing runs one batch ahead of the writer, so cancellation lands within a batch or two.
+        assert!(s.records >= 4 && s.records < 40, "records {}", s.records);
+        assert_eq!(s.records % 4, 0, "only whole batches are committed");
         assert_eq!(store.job(s.job_id).unwrap().status, JobStatus::Cancelled);
     }
 
     #[test]
     fn file_appended_during_import_aborts_before_committing_the_batch() {
-        let f = temp_log(&[LINE; 6]);
+        let f = temp_log(&[LINE; 20]);
         let mut store = Store::open_in_memory(&StoreConfig::default()).unwrap();
         let cfg = ImportConfig {
             batch_max_rows: 2,
@@ -767,9 +913,10 @@ mod tests {
         assert!(matches!(err, EngineError::SourceChanged { .. }));
         let job = store.job(store.latest_job_id().unwrap().unwrap()).unwrap();
         assert_eq!(job.status, JobStatus::Failed);
-        assert_eq!(
-            job.committed_records, 2,
-            "only the batch before the change is committed"
+        assert!(
+            job.committed_records >= 2 && job.committed_records < 20,
+            "batches before the change stay committed, the rest is not imported: {}",
+            job.committed_records
         );
     }
 
