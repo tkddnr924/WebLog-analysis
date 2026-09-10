@@ -144,11 +144,13 @@ $B verify --db bench-data/a.duckdb --source 1 --full [--relink /new/path/a.log]
 | 배포 번들 | `apps/desktop`에서 `pnpm tauri build` → Windows NSIS/MSI, macOS DMG (Windows 번들은 아직 만들어 보지 않음) |
 | 검사 | `scripts/check.sh` 또는 `scripts\check.ps1` |
 | 프로젝트 DB | 사용자가 고른 `.duckdb` 파일 하나(+ 잠시 `.wal`). 원본 로그와 같은 볼륨에 두지 않아도 된다 |
-| 사용자 프리셋 | 실행 파일 옆 `presets/<이름>.yaml` |
 | 케이스 DB | 실행 파일 옆 `cases/<로그 폴더 이름>-<YYYYMMDD-HHMMSS>.duckdb` |
-| 실행 로그 | 실행 파일 옆 `logs/weblog.log`(4MiB를 넘으면 `weblog.prev.log`로 밀어냄). 문제를 보고할 때 이 파일을 첨부한다 |
+| 실행 로그 | `cases/logs/weblog.log`(4MiB를 넘으면 `weblog.prev.log`로 밀어냄). 문제를 보고할 때 이 파일을 첨부한다 |
+| 사용자 프리셋 | `cases/presets/<이름>.yaml`(저장할 때만 생긴다) |
 | 내보내기 | 사용자가 고른 경로. 부분 결과(취소)도 파일로 남고 화면에 표시된다 |
 | 복구 | 앱을 다시 열면 중단된 작업을 알림으로 알려 준다. 재개·활성화·결과 삭제·소스 검증은 CLI(`weblog resume` / `jobs` / `activate` / `delete-results` / `verify`)로 한다 |
+
+앱이 만드는 파일은 실행 파일 옆 `cases` 폴더 하나뿐이다. WebView2 캐시만 임시 폴더(`%TEMP%\weblog-webview`)에 두고 종료할 때 지운다. 창을 코드에서 만들며 이 경로를 지정하므로 `%LOCALAPPDATA%`에는 아무것도 만들지 않는다(지정하지 않으면 Tauri가 `%LOCALAPPDATA%\<identifier>`를 강제한다). 레지스트리도 쓰지 않는다.
 
 실행 파일이 있는 폴더에 쓸 수 없으면(예: Program Files) 임시 폴더 아래 `weblog/`를 대신 쓰고 그 사실을 로그에 남긴다. 쓰기 가능한 폴더에 두고 실행하는 것을 권한다.
 

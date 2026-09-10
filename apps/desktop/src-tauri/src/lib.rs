@@ -15,27 +15,45 @@ pub const IMPORT_EVENT: &str = "weblog://import";
 /// 앱을 실행한다.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let result = tauri::Builder::default()
+    // WebView2 캐시는 임시 폴더에 두고 종료할 때 지운다. 지정하지 않으면 Tauri가
+    // `%LOCALAPPDATA%\<identifier>`를 강제해 AppData에 흔적이 남는다.
+    let webview_cache = paths::webview_cache_dir();
+    let cache_for_setup = webview_cache.clone();
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
-            // 케이스·프리셋·로그는 실행 파일 옆에 둔다. 설치 폴더가 읽기 전용이면 임시 폴더로 물러난다.
+            // 파일은 실행 파일 옆 `cases` 하나에만 남긴다. 폴더가 읽기 전용이면 임시 폴더로 물러난다.
             let (root, fallback_note) = paths::data_root(paths::exe_dir());
-            let log_path = applog::init(&root.join("logs")).ok();
+            let dirs = paths::layout(&root);
+            let log_path = applog::init(&dirs.logs).ok();
             applog::install_panic_hook();
             applog::info(&format!(
-                "앱 시작 version={} root={} log={}",
+                "앱 시작 version={} cases={} log={} webview={}",
                 env!("CARGO_PKG_VERSION"),
-                root.display(),
+                dirs.cases.display(),
                 log_path
                     .as_ref()
-                    .map_or_else(|| "없음".to_owned(), |p| p.display().to_string())
+                    .map_or_else(|| "없음".to_owned(), |p| p.display().to_string()),
+                cache_for_setup.display()
             ));
             if let Some(note) = &fallback_note {
                 applog::error(note);
             }
+            // 창은 설정(create=false) 대신 여기서 만든다. WebView2 데이터 폴더를 지정하려면
+            // 빌더가 필요하다.
+            for window in &app.config().app.windows.clone() {
+                let built = tauri::WebviewWindowBuilder::from_config(app.handle(), window)?
+                    .data_directory(cache_for_setup.clone())
+                    .build()?;
+                applog::info(&format!(
+                    "창 생성 label={} 표시={}",
+                    window.label,
+                    built.is_visible().unwrap_or(false)
+                ));
+            }
             let service = Arc::new(Service::new(ServiceConfig {
-                profiles_dir: Some(root.join("presets")),
-                cases_dir: Some(root.join("cases")),
+                profiles_dir: Some(dirs.presets),
+                cases_dir: Some(dirs.cases),
                 ..ServiceConfig::default()
             }));
             let handle = app.handle().clone();
@@ -80,10 +98,19 @@ pub fn run() {
             commands::cancel_export,
             commands::export_status,
         ])
-        .run(tauri::generate_context!());
-    if let Err(e) = result {
-        eprintln!("앱 실행 실패: {e}");
-        std::process::exit(1);
+        .build(tauri::generate_context!());
+    match app {
+        Ok(app) => app.run(move |_handle, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                applog::info("앱 종료");
+                paths::remove_webview_cache(&webview_cache);
+            }
+        }),
+        Err(e) => {
+            applog::error(&format!("앱 실행 실패: {e}"));
+            eprintln!("앱 실행 실패: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

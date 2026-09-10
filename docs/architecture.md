@@ -21,9 +21,10 @@ AGENTS.md에서 옮긴 프로젝트 구현 제약이다. 관련 구현을 변경
 
 ## 저장 위치와 실행 로그
 
-- 케이스 DB·사용자 프리셋·실행 로그는 실행 파일이 있는 폴더 아래 `cases/`, `presets/`, `logs/`에 둔다(포터블). OS별 앱 데이터 폴더와 번들 식별자에 의존하지 않는다.
+- 앱이 만드는 파일은 실행 파일 폴더 아래 `cases/` 하나로 모은다: 케이스 DB는 `cases/*.duckdb`, 실행 로그는 `cases/logs/`, 사용자 프리셋은 `cases/presets/`(포터블). OS별 앱 데이터 폴더와 번들 식별자에 의존하지 않는다.
+- WebView2(Windows) 사용자 데이터 폴더는 임시 폴더의 `weblog-webview`로 지정하고 `RunEvent::Exit`에서 지운다. 지정하지 않으면 Tauri가 `LocalData/<identifier>`를 강제하므로(`tauri/src/manager/webview.rs`) 창을 설정(`create: false`) 대신 `WebviewWindowBuilder::from_config(..).data_directory(..)`로 만든다. 설정의 `dataDirectory`는 상대 경로만 받아 결국 `local_data_dir` 아래로 풀리므로 쓸 수 없다.
 - 실행 파일 폴더에 쓸 수 없으면 임시 폴더 아래 `weblog/`로 물러나고 그 사실을 로그에 남긴다.
-- 로그는 `logs/weblog.log` 한 파일이며 4MiB를 넘으면 시작할 때 `weblog.prev.log`로 밀어낸다. 남기는 항목은 앱 시작(버전·경로), 케이스 생성, 가져오기 요청(파일 수·총 바이트·첫 경로)·시작·진행(1초 간격)·종료(건수·소요), 명령 오류, 패닉(스레드·위치·메시지)이다.
+- 로그는 `cases/logs/weblog.log` 한 파일이며 4MiB를 넘으면 시작할 때 `weblog.prev.log`로 밀어낸다. 남기는 항목은 앱 시작(버전·경로), 창 생성, 케이스 생성, 가져오기 요청(파일 수·총 바이트·첫 경로)·시작·진행(1초 간격)·종료(건수·소요), 명령 오류, 패닉(스레드·위치·메시지), 앱 종료다.
 - 로그에는 로그 원문과 파싱 필드 값을 남기지 않는다. 릴리스 빌드는 `panic = "abort"`라 패닉 훅이 남긴 마지막 줄이 종료 지점을 알려 준다. 문제를 보고할 때 이 파일을 첨부한다.
 
 ## 상세 명세
