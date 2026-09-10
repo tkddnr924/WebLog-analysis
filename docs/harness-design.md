@@ -1,6 +1,6 @@
 # WebLog 개발 하네스 설계
 
-상태: 사용자 합의 반영 완료. 공통 작업 지침은 루트 AGENTS.md, Claude 진입점은 CLAUDE.md를 따른다. 앱 구현은 Claude가 담당한다.
+상태: 사용자 합의 반영 완료.
 
 ## 1. 확정 사항
 
@@ -26,7 +26,6 @@
 
 ## 2. 규칙의 배치
 
-- 루트 [AGENTS.md](../AGENTS.md): 모든 작업에 적용하는 공통 개발 지침과 관련 문서 안내.
 - [docs/README.md](README.md): 프로젝트 위키 목차와 문서별 관리 대상.
 - [docs/project-overview.md](project-overview.md): 확정 범위, 대상 환경, 데이터 보존 정책.
 - [docs/architecture.md](architecture.md): 의존 방향과 데이터 처리 제약, 상세 모듈 책임·IPC 계약 문서 안내.
@@ -37,7 +36,6 @@
 - scripts/check: 로컬과 CI가 함께 사용하는 검사 진입점.
 - fixtures/: 합성 로그, 포맷 정의, 예상 결과.
 
-하위 AGENTS.md는 디렉터리별 규칙이 실제로 달라질 때만 추가한다. 공통 규칙을 복제하지 않는다.
 
 ## 3. 에이전트 작업 규칙
 

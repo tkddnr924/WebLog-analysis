@@ -8,7 +8,10 @@
 /apps/desktop/src-tauri/target
 .DS_Store
 /Fonts
-# 로컬 스킬 심볼릭 링크(도구별 캐시)
+# 에이전트 도구 파일(작업 지침·스킬·작업 계획). 저장소에는 소스와 문서만 둔다.
 /.claude
-# 외부 공유 금지 자료(크래시 리포트 등). 업체명·사용자 경로가 들어 있다.
-/agent/ref
+/.agents
+/agent
+/AGENTS.md
+/CLAUDE.md
+/skills-lock.json

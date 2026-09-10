@@ -1,6 +1,6 @@
 # WebLog-analysis
 
-대용량 웹 서버 접근 로그(Apache/Nginx, IIS W3C, 커스텀 단일행)를 파싱해 DuckDB에 저장하고 조회하는 데스크톱 도구. 5단계까지 구현되어 있다(파서·저장·조회 엔진, 탐색·판별·복구, Tauri/React 화면, 퍼즐식 포맷 확인, 통계·저장된 뷰·스트리밍 내보내기). 시나리오별 검증 상태는 [docs/verification.md](docs/verification.md)에 있다. 설계·규칙은 [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md), [프로젝트 위키](docs/README.md)를 따른다.
+대용량 웹 서버 접근 로그(Apache/Nginx, IIS W3C, 커스텀 단일행)를 파싱해 DuckDB에 저장하고 조회하는 데스크톱 도구. 5단계까지 구현되어 있다(파서·저장·조회 엔진, 탐색·판별·복구, Tauri/React 화면, 퍼즐식 포맷 확인, 통계·저장된 뷰·스트리밍 내보내기). 시나리오별 검증 상태는 [docs/verification.md](docs/verification.md)에 있다. 설계·규칙은 [프로젝트 위키](docs/README.md)를 따른다.
 
 ## 구성
 

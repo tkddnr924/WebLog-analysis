@@ -1,6 +1,6 @@
 # WebLog 위키
 
-프로젝트의 범위, 설계, 구현 상태와 검증 기록을 관리하는 Markdown 위키다. 공통 개발 지침은 [AGENTS.md](../AGENTS.md), 설치·실행·사용법은 [저장소 README](../README.md)에 있다.
+프로젝트의 범위, 설계, 구현 상태와 검증 기록을 관리하는 Markdown 위키다. 설치·실행·사용법은 [저장소 README](../README.md)에 있다.
 
 ## 문서 목차
 
