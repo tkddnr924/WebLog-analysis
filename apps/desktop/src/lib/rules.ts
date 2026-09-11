@@ -39,6 +39,16 @@ export const BUILTIN_SOURCES: string[] = [
     condition:
         status in 200..299
 }`,
+  `rule page_requests
+{
+    meta:
+        name = "웹 페이지 요청만"
+        description = "js·css·이미지·폰트 같은 정적 리소스 요청을 빼고 실제 페이지·API 요청만 봅니다."
+    strings:
+        $asset = /\\.(?:js|mjs|cjs|css|map|png|jpe?g|gif|webp|avif|svg|ico|bmp|cur|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|pdf|zip|gz|swf|txt)(?:\\?|#|$)/ nocase
+    condition:
+        path is null or not $asset
+}`,
   `rule sql_injection
 {
     meta:
@@ -101,18 +111,6 @@ export const BUILTIN_SOURCES: string[] = [
         $files = /\\/\\.env|\\/\\.git\\/|\\/\\.aws\\/|\\/etc\\/passwd|\\/config\\.php|\\/shell\\.php|\\/cgi-bin\\// nocase
     condition:
         any of them
-}`,
-  `rule sql_injection_success
-{
-    meta:
-        name = "SQL Injection · 성공 응답"
-        description = "서명이 있는데 2xx로 응답한 요청. 우선 확인 대상."
-    strings:
-        $union = /union[%20\\s+]+(all[%20\\s+]+)?select/ nocase
-        $quote = /'\\s*(or|and)\\s*'?\\d/ nocase
-        $enc   = "%27"
-    condition:
-        status in 200..299 and any of them
 }`,
   `rule sqlmap
 {

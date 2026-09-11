@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatTime, parseTimeInput, statusClass } from "./format";
+import { formatBytes, formatTime, methodClass, parseTimeInput, statusClass } from "./format";
 import { appendPage, emptyCache } from "./pages";
 import type { LogPage, LogRow } from "../types";
 
@@ -26,6 +26,18 @@ describe("format", () => {
     expect(statusClass(200)).toBe("s2");
     expect(statusClass(404)).toBe("s4");
     expect(statusClass(null)).toBe("s0");
+  });
+
+  it("classifies methods by read/write/delete and marks non-standard ones", () => {
+    expect(methodClass("GET")).toBe("m-read");
+    expect(methodClass("head")).toBe("m-read");
+    expect(methodClass("POST")).toBe("m-write");
+    expect(methodClass("PATCH")).toBe("m-write");
+    expect(methodClass("DELETE")).toBe("m-del");
+    // 비표준 메서드는 눈에 띄어야 한다.
+    expect(methodClass("SSTP_DUPLEX_POST")).toBe("m-odd");
+    expect(methodClass(null)).toBe("m-none");
+    expect(methodClass("")).toBe("m-none");
   });
 });
 

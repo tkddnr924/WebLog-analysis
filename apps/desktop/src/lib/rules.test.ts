@@ -74,8 +74,7 @@ describe("builtin rules", () => {
     expect(evalExpr(byId("path_traversal").expr, req("/../../etc/passwd"))).toBe(true);
     expect(evalExpr(byId("scanner_paths").expr, req("/wp-login.php"))).toBe(true);
     expect(evalExpr(byId("command_injection").expr, req("/ping?host=1.1.1.1;cat%20/etc/passwd"))).toBe(true);
-    expect(evalExpr(byId("sql_injection_success").expr, req("/x?id=%27", 200))).toBe(true);
-    expect(evalExpr(byId("sql_injection_success").expr, req("/x?id=%27", 404))).toBe(false);
+    expect(evalExpr(byId("scanner_tools").expr, req("/", 200, "Mozilla/5.0 (Nikto/2.1.6)"))).toBe(true);
     expect(evalExpr(byId("bots").expr, req("/", 200, "python-requests/2.31"))).toBe(true);
     expect(evalExpr(byId("bots").expr, req("/", 200, null))).toBe(true);
     const sqlmap = byId("sqlmap").expr;
@@ -94,11 +93,36 @@ describe("builtin rules", () => {
     expect(evalExpr(byId("lfi_ssrf").expr, req("/page?file=php://filter/convert.base64-encode/resource=index"))).toBe(true);
     expect(evalExpr(byId("lfi_ssrf").expr, req("/fetch?url=http://169.254.169.254/latest/meta-data/"))).toBe(true);
     expect(evalExpr(byId("webshell_upload").expr, req("/uploads/2026/shell.php?cmd=id"))).toBe(true);
-    expect(evalExpr(byId("scanner_tools").expr, req("/", 200, "Mozilla/5.0 (Nikto/2.1.6)"))).toBe(true);
-    for (const r of BUILTIN_RULES.filter((x) => !["bookmarks", "all_requests", "ok_responses"].some((id) => x.id === `builtin:${id}`))) {
+    for (const r of BUILTIN_RULES.filter((x) => !["bookmarks", "all_requests", "ok_responses", "page_requests"].some((id) => x.id === `builtin:${id}`))) {
       expect(evalExpr(r.expr, req("/index.html")), r.id).toBe(false);
       expect(evalExpr(r.expr, req("/api/users/42?page=2&sort=name")), r.id).toBe(false);
     }
+  });
+
+  it("page rule drops static assets and keeps real pages", () => {
+    const page = byId("page_requests").expr;
+    expect(evalExpr(page, req("/"))).toBe(true);
+    expect(evalExpr(page, req("/index.html"))).toBe(true);
+    expect(evalExpr(page, req("/board/view.php?id=3"))).toBe(true);
+    expect(evalExpr(page, req("/api/users/42?page=2"))).toBe(true);
+    for (const asset of [
+      "/static/app.js",
+      "/assets/main.min.css?v=3",
+      "/img/logo.gif",
+      "/img/hero.PNG",
+      "/fonts/roboto.woff2",
+      "/favicon.ico",
+      "/bundle.js.map",
+      "/media/intro.mp4",
+      "/docs/manual.pdf",
+      "/style.css#top",
+    ]) {
+      expect(evalExpr(page, req(asset)), asset).toBe(false);
+    }
+    // 확장자가 경로 중간에만 있으면 리소스가 아니다.
+    expect(evalExpr(page, req("/download?file=report.css.php"))).toBe(true);
+    // 경로를 못 읽은 행(깨진 요청 줄)은 리소스로 볼 수 없으므로 남긴다. SQL의 NOT은 NULL을 떨어뜨린다.
+    expect(evalExpr(page, { ...req("/"), request_target: null })).toBe(true);
   });
 });
 

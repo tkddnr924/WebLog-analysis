@@ -58,6 +58,16 @@ export function statusClass(status: number | null): "s2" | "s3" | "s4" | "s5" | 
   return "s0";
 }
 
+/** 메서드 라벨 색. 읽기·쓰기·삭제로 나누고, 표준이 아닌 값은 따로 표시한다. */
+export function methodClass(method: string | null): "m-read" | "m-write" | "m-del" | "m-odd" | "m-none" {
+  const m = (method ?? "").toUpperCase();
+  if (m === "") return "m-none";
+  if (m === "GET" || m === "HEAD" || m === "OPTIONS" || m === "TRACE") return "m-read";
+  if (m === "POST" || m === "PUT" || m === "PATCH" || m === "CONNECT") return "m-write";
+  if (m === "DELETE") return "m-del";
+  return "m-odd";
+}
+
 const JOB_STATUS_LABELS: Record<JobStatus, string> = {
   queued: "대기",
   running: "진행 중",

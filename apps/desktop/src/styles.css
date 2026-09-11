@@ -343,7 +343,7 @@ td.ok { color: var(--s2); }
 .unit-toggle:hover { color: var(--accent); border-color: var(--accent); }
 .query-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
 .table-wrap.virtual { flex: 1; max-height: none; position: relative; }
-.vhead, .vrow { display: grid; grid-template-columns: 24px 160px 150px 64px 1fr 56px 80px 100px; column-gap: 10px; align-items: center; padding: 0 10px; }
+.vhead, .vrow { display: grid; grid-template-columns: 24px 160px 150px 104px 1fr 56px 80px 100px; column-gap: 10px; align-items: center; padding: 0 10px; }
 /* 에러 로그는 컬럼이 다르다. 메시지가 남는 폭을 차지하고 한 줄로 줄인다. */
 .vhead.verr, .vrow.verr { grid-template-columns: 24px 160px 124px 150px minmax(0, 1fr) 100px; }
 .vhead.vbm, .vrow.vbm { grid-template-columns: 24px 160px minmax(0, 1fr); }
@@ -368,6 +368,13 @@ td.ok { color: var(--s2); }
 .chip.s4 { background: #f8ead2; color: #8a6420; }
 .chip.s5 { background: #f8dcd9; color: #9c3f38; }
 .chip.s0 { background: #e8e6e1; color: var(--muted); }
+.chip.m-read { background: #dfe9f4; color: #3a5f88; }
+.chip.m-write { background: #eae1f3; color: #6a4a91; }
+.chip.m-del { background: #f8dcd9; color: #9c3f38; }
+.chip.m-odd { background: #f6e2c8; color: #8a5a17; }
+.chip.m-none { background: #e8e6e1; color: var(--muted); }
+/* 메서드 값은 길 수 있다. 칸을 넘기지 않고 줄인다. */
+.vrow .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty, .loading { position: sticky; bottom: 0; padding: 10px; color: var(--muted); background: var(--surface); }
 
 .tabs { display: flex; border-bottom: 1px solid var(--line); }

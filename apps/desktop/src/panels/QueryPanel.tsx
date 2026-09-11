@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppState } from "../state";
-import { formatCount, formatTime, statusClass } from "../lib/format";
+import { formatCount, formatTime, methodClass, statusClass } from "../lib/format";
 import { applyScope, type Scope } from "../lib/scope";
 import { emptyFilter, type FilterExpr, type LogFilter, type SortOrder } from "../types";
 import { DetailPanel } from "./DetailPanel";
@@ -165,7 +165,11 @@ export function QueryPanel() {
                   </button>
                   <span className="mono">{formatTime(r.timestamp_utc)}</span>
                   <span className="mono">{r.client_ip ?? "–"}</span>
-                  <span>{r.method ?? "–"}</span>
+                  <span>
+                    <span className={`chip ${methodClass(r.method)}`} title={r.method ?? ""}>
+                      {r.method ?? "–"}
+                    </span>
+                  </span>
                   <span className="mono" title={r.request_target ?? ""}>
                     {r.request_target ?? "–"}
                   </span>
